@@ -153,6 +153,8 @@ export class HandTracker {
     ];
     this.ready = false;
     this.running = false;
+    this.palmDetecting = false;   // is palm worker currently busy?
+    this.pendingDetections = null; // stashed results from last palm detect
   }
 
   async init(onStatus) {
@@ -178,19 +180,12 @@ export class HandTracker {
     const vh = video.videoHeight;
 
     try {
-      // Palm detection: only when there are empty slots
-      const emptySlots = this.slots.filter(s => !s.active);
+      // If pending detections arrived from a previous palm detect, assign them now
+      if (this.pendingDetections) {
+        const { detections, letterbox } = this.pendingDetections;
+        this.pendingDetections = null;
 
-      if (emptySlots.length > 0) {
-        const palmBitmap = await createImageBitmap(video);
-        const { detections, letterbox } = await this.palmWorker.detect(palmBitmap);
-
-        if (detections.length > 0) {
-          logPalm(`[palm] ${detections.length} detections`, detections.map(d =>
-            `score=${d.score.toFixed(2)} cx=${d.cx.toFixed(3)} cy=${d.cy.toFixed(3)}`
-          ));
-        }
-
+        const emptySlots = this.slots.filter(s => !s.active);
         for (const det of detections) {
           if (emptySlots.length === 0) break;
 
@@ -221,6 +216,21 @@ export class HandTracker {
           slot.rect = rect;
           logSlot(`[new hand] slot ${slot.index} cx=${rect.cx.toFixed(0)} cy=${rect.cy.toFixed(0)}`);
         }
+      }
+
+      // Fire off palm detection async if there are empty slots and we're not already detecting
+      const hasEmptySlots = this.slots.some(s => !s.active);
+      if (hasEmptySlots && !this.palmDetecting) {
+        this.palmDetecting = true;
+        createImageBitmap(video).then(bitmap => {
+          this.palmWorker.detect(bitmap).then(result => {
+            this.palmDetecting = false;
+            if (result.detections.length > 0) {
+              logPalm(`[palm] ${result.detections.length} detections`);
+              this.pendingDetections = result;
+            }
+          }).catch(() => { this.palmDetecting = false; });
+        });
       }
 
       // Parallel landmark inference via Promise.all
