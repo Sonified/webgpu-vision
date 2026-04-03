@@ -4,7 +4,7 @@ A port of Google's MediaPipe hand tracking pipeline to run on WebGPU compute sha
 
 ## Why This Exists
 
-MediaPipe's browser SDK uses WebGL internally for inference with synchronous `glReadPixels` readbacks costing 8-22ms per call. Two-hand tracking drops to ~15fps. The WASM binary is sealed -- you can't optimize it. This project replaces the inference path with WebGPU compute shaders via ONNX Runtime Web.
+MediaPipe's browser SDK uses WebGL internally for inference with synchronous `glReadPixels` readbacks costing 8-22ms per call. Two-hand tracking drops to ~15fps. The WASM binary is sealed; you can't optimize it. This project replaces the inference path with WebGPU compute shaders via ONNX Runtime Web.
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ Open http://localhost:5173 in Chrome 113+ (or any browser with WebGPU support). 
 Three Web Workers, all GPU-accelerated. Main thread is pure orchestration.
 
 - **Palm Worker**: WebGPU compute shader letterbox preprocessing + BlazePalm ONNX inference + anchor decode + weighted NMS. Runs async, fire-and-forget, never blocks tracking.
-- **Landmark Worker 0**: WebGPU compute shader affine warp + Hand Landmark ONNX inference (hand 0). Shares ONNX RT's WebGPU device via `ort.env.webgpu.device` -- `Tensor.fromGpuBuffer()` passes the warp output directly to inference with zero CPU readback.
+- **Landmark Worker 0**: WebGPU compute shader affine warp + Hand Landmark ONNX inference (hand 0). Shares ONNX RT's WebGPU device via `ort.env.webgpu.device`. `Tensor.fromGpuBuffer()` passes the warp output directly to inference with zero CPU readback.
 - **Landmark Worker 1**: Same as above for hand 1. Both run in parallel via `Promise.all`.
 
 Main thread only does: `createImageBitmap(video)`, `postMessage` to workers, `landmarksToRect` math (12 points), and canvas overlay drawing. No ONNX imports, no preprocessing, no inference.
@@ -62,9 +62,9 @@ Tracking loop skips palm detection when hands are found.
 
 - **OpenCV Zoo ONNX models** (Apache 2.0): `palm_detection_mediapipe_2023feb.onnx` (3.7MB, 192x192 input, [0,1] normalization) and `handpose_estimation_mediapipe_2023feb.onnx` (3.9MB, 224x224 input, [0,1] normalization). NOT the PINTO post-processed models which have NMS baked in.
 - **Anchor generation**: 2016 anchors, strides [8,16,16,16], 2 anchors per grid cell, fixed anchor size. Scores are raw logits (sigmoid applied in decode).
-- **Weighted NMS** (not standard suppress-and-discard): overlapping detections averaged by score.
+- **Weighted NMS** (not standard suppress and discard): overlapping detections averaged by score.
 - **Detection-to-rotated-rect**: ported from geaxgx reference. Works in pixel space, square_long=true (longer side * 2.9), shift_y=-0.5 in rotated direction.
-- **Landmarks-to-rect**: uses 12 stable palm/MCP landmarks (IDs 0,1,2,3,5,6,9,10,13,14,17,18) -- no fingertips. Rotation from wrist to weighted average of 3 MCPs. Bounds computed in rotated coordinate space.
+- **Landmarks-to-rect**: uses 12 stable palm/MCP landmarks (IDs 0,1,2,3,5,6,9,10,13,14,17,18), no fingertips. Rotation from wrist to weighted average of 3 MCPs. Bounds computed in rotated coordinate space.
 - **Affine warp**: 3-point affine transform matching mediapipe_utils.py `warp_rect_img()`. Corner ordering: p0(BL), p1(TL), p2(TR), p3(BR). Warp uses pts[1:] = [TL, TR, BR] mapped to [(0,0), (S,0), (S,S)].
 - **Zero CPU readback**: Each landmark worker gets ONNX RT's device via `await ort.env.webgpu.device` (after session creation), builds compute shader on that device, uses `Tensor.fromGpuBuffer()` to pass warp output directly to inference.
 - **Web Workers for true parallelism**: ONNX RT's WASM backend shares memory within a thread, so concurrent `.run()` calls on the same thread deadlock. Separate workers = separate WASM instances = true parallel inference.
