@@ -4,7 +4,7 @@ A port of Google's MediaPipe hand tracking pipeline to run on WebGPU compute sha
 
 ## Why This Exists
 
-MediaPipe's browser SDK uses WebGL internally for inference with synchronous `glReadPixels` readbacks costing 8-22ms per call. Two-hand tracking drops to ~15fps. The WASM binary is sealed; you can't optimize it. This project replaces the inference path with WebGPU compute shaders via ONNX Runtime Web, achieving 120fps two-hand tracking with zero CPU readback.
+MediaPipe's browser SDK uses WebGL internally for inference with synchronous readbacks. Two-hand tracking tops out around 47fps at ~19ms per frame. The WASM binary is sealed; you can't optimize it. This project replaces the inference path with WebGPU compute shaders via ONNX Runtime Web -- 72fps two-hand tracking with ~13ms per frame and zero CPU readback.
 
 The GPU turns to the CPU like... "Hold my bear." 🧸
 
@@ -73,10 +73,13 @@ Tracking loop skips palm detection when hands are found.
 
 ## Performance
 
-| Metric | MediaPipe WebGL | webgpu-vision |
-|--------|----------------|---------------|
-| Two-hand tracking | ~15fps | 120fps |
-| CPU readback per hand | 8-22ms (glReadPixels) | 252 bytes (landmarks only) |
+Tested on MacBook Pro M1 Max (32-core GPU, 64GB), Chrome 146, macOS 26.2, 640x480 camera, two hands tracked. MediaPipe uses its official `@mediapipe/tasks-vision` HandLandmarker with GPU delegate. See [benchmark/](benchmark/) to reproduce.
+
+| Metric | MediaPipe (Tasks Vision, GPU) | webgpu-vision |
+|--------|-------------------------------|---------------|
+| Two-hand FPS | ~47fps | ~72fps |
+| Per-frame latency | ~19ms | ~13ms |
+| CPU readback | Full frame via WebGL | 252 bytes (landmarks only) |
 | Pipeline visibility | Sealed WASM binary | Full source |
 | Parallel two-hand | Serial (same WebGL context) | True parallel (separate workers) |
 
