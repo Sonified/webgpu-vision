@@ -1,15 +1,14 @@
-// Hand tracking pipeline: loads models, runs inference, returns detections/landmarks.
-// Uses two Web Workers for true parallel landmark inference.
+// Hand tracking pipeline: palm detection on main thread, landmark inference in workers.
+// Workers receive ImageBitmaps and do crop + preprocess + inference -- main thread stays light.
 
 import * as ort from 'onnxruntime-web/webgpu';
 import { generateAnchors, decodeDetections } from './anchors.js';
 import { weightedNMS, detectionToRect } from './nms.js';
-import { preprocessPalm, preprocessLandmark } from './preprocessing.js';
+import { preprocessPalm } from './preprocessing.js';
 
 const PALM_MODEL_URL = '/models/palm_detection_lite.onnx';
 const LANDMARK_MODEL_URL = '/models/hand_landmark_full.onnx';
 const HAND_FLAG_THRESHOLD = 0.5;
-const LANDMARK_SIZE = 224;
 
 // Rate-limited logger
 function makeLogger(intervalMs = 2000) {
@@ -27,20 +26,8 @@ const logSlot = makeLogger(2000);
 const logLandmark = makeLogger(2000);
 
 /**
- * Compute the 4 corner points of a rotated rectangle (in pixels).
- */
-function rotatedRectPoints(cx, cy, w, h, rotation) {
-  const b = Math.cos(rotation) * 0.5;
-  const a = Math.sin(rotation) * 0.5;
-  const p0x = cx - a * h - b * w, p0y = cy + b * h - a * w;
-  const p1x = cx + a * h - b * w, p1y = cy - b * h - a * w;
-  const p2x = 2 * cx - p0x,       p2y = 2 * cy - p0y;
-  const p3x = 2 * cx - p1x,       p3y = 2 * cy - p1y;
-  return [[p0x, p0y], [p1x, p1y], [p2x, p2y], [p3x, p3y]];
-}
-
-/**
- * Wraps a Web Worker for landmark inference with a promise-based API.
+ * Wraps a Web Worker with a promise-based inference API.
+ * Sends ImageBitmap + rect, receives projected landmarks.
  */
 class LandmarkWorker {
   constructor() {
@@ -66,14 +53,12 @@ class LandmarkWorker {
     });
   }
 
-  infer(inputFloat32) {
+  infer(bitmap, rect, vw, vh) {
     return new Promise((resolve) => {
       this.pendingResolve = resolve;
-      // Transfer the buffer (zero-copy)
-      const buffer = inputFloat32.buffer.slice(0);
       this.worker.postMessage(
-        { type: 'infer', inputBuffer: buffer, id: 0 },
-        [buffer]
+        { type: 'infer', bitmap, rect, vw, vh },
+        [bitmap] // transfer bitmap (zero-copy)
       );
     });
   }
@@ -82,8 +67,21 @@ class LandmarkWorker {
     if (e.data.type === 'result' && this.pendingResolve) {
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
+
+      let landmarks = [];
+      if (e.data.landmarks) {
+        const flat = new Float32Array(e.data.landmarks);
+        for (let i = 0; i < 21; i++) {
+          landmarks.push({
+            x: flat[i * 3],
+            y: flat[i * 3 + 1],
+            z: flat[i * 3 + 2],
+          });
+        }
+      }
+
       resolve({
-        landmarks: new Float32Array(e.data.landmarksBuffer),
+        landmarks,
         handFlag: e.data.handFlag,
         handedness: e.data.handedness,
       });
@@ -92,98 +90,9 @@ class LandmarkWorker {
       if (this.pendingResolve) {
         const resolve = this.pendingResolve;
         this.pendingResolve = null;
-        resolve({ landmarks: new Float32Array(0), handFlag: 0, handedness: 0 });
+        resolve({ landmarks: [], handFlag: 0, handedness: 0 });
       }
     }
-  }
-}
-
-/**
- * One hand slot: owns its own warp canvas and worker.
- */
-class HandSlot {
-  constructor(index, worker) {
-    this.index = index;
-    this.worker = worker;
-    this.active = false;
-    this.rect = null;
-    this.landmarks = null;
-    this.warpCanvas = new OffscreenCanvas(LANDMARK_SIZE, LANDMARK_SIZE);
-    this.warpCtx = this.warpCanvas.getContext('2d', { willReadFrequently: true });
-    this._lastCrop = null;
-  }
-
-  cropRotatedRect(video, rect) {
-    const ctx = this.warpCtx;
-    const S = LANDMARK_SIZE;
-
-    const pts = rotatedRectPoints(rect.cx, rect.cy, rect.w, rect.h, rect.angle);
-    const [p1x, p1y] = pts[1];
-    const [p2x, p2y] = pts[2];
-    const [p3x, p3y] = pts[3];
-
-    const dx1 = p2x - p1x, dy1 = p2y - p1y;
-    const dx2 = p3x - p1x, dy2 = p3y - p1y;
-    const det = dx1 * dy2 - dx2 * dy1;
-    if (Math.abs(det) < 1e-6) return null;
-
-    const invDet = 1 / det;
-    const a = S * (dy2 - dy1) * invDet;
-    const b = S * (dx1 - dx2) * invDet;
-    const d = S * (-dy1) * invDet;
-    const e = S * (dx1) * invDet;
-    const c = -a * p1x - b * p1y;
-    const f = -d * p1x - e * p1y;
-
-    ctx.resetTransform();
-    ctx.clearRect(0, 0, S, S);
-    ctx.setTransform(a, d, b, e, c, f);
-    ctx.drawImage(video, 0, 0);
-    ctx.resetTransform();
-
-    const imageData = ctx.getImageData(0, 0, S, S);
-
-    const detM = a * e - b * d;
-    const inverseTransform = {
-      a: e / detM, b: -b / detM,
-      c: -(e * c - b * f) / detM,
-      d: -d / detM, e: a / detM,
-      f: -(-d * c + a * f) / detM,
-    };
-
-    return { imageData, inverseTransform };
-  }
-
-  async runLandmark(video, vw, vh) {
-    const crop = this.cropRotatedRect(video, this.rect);
-    if (!crop) return { landmarks: [], handFlag: 0, handedness: 0 };
-
-    const { imageData, inverseTransform } = crop;
-    this._lastCrop = imageData;
-    const data = preprocessLandmark(imageData);
-
-    // Send to worker, get results back
-    const result = await this.worker.infer(data);
-
-    // Project landmarks back to video-normalized [0,1] space
-    const projectedLandmarks = [];
-    if (result.landmarks.length === 63) {
-      const inv = inverseTransform;
-      for (let i = 0; i < 21; i++) {
-        const ox = result.landmarks[i * 3];
-        const oy = result.landmarks[i * 3 + 1];
-        const oz = result.landmarks[i * 3 + 2];
-        const vx = inv.a * ox + inv.b * oy + inv.c;
-        const vy = inv.d * ox + inv.e * oy + inv.f;
-        projectedLandmarks.push({ x: vx / vw, y: vy / vh, z: oz / LANDMARK_SIZE });
-      }
-    }
-
-    return {
-      landmarks: projectedLandmarks,
-      handFlag: result.handFlag,
-      handedness: result.handedness,
-    };
   }
 }
 
@@ -192,7 +101,10 @@ export class HandTracker {
     this.palmSession = null;
     this.anchors = null;
     this.workers = [new LandmarkWorker(), new LandmarkWorker()];
-    this.slots = null; // created after workers init
+    this.slots = [
+      { index: 0, worker: this.workers[0], active: false, rect: null, landmarks: null },
+      { index: 1, worker: this.workers[1], active: false, rect: null, landmarks: null },
+    ];
     this.ready = false;
     this.running = false;
   }
@@ -207,24 +119,15 @@ export class HandTracker {
       graphOptimizationLevel: 'all',
     });
 
-    // Warmup palm detection
     const warmPalm = new ort.Tensor('float32', new Float32Array(192 * 192 * 3), [1, 192, 192, 3]);
     await this.palmSession.run({ [this.palmSession.inputNames[0]]: warmPalm });
 
-    // Initialize two landmark workers (sequentially to avoid WebGPU init conflicts,
-    // but they'll run in TRUE parallel after init)
     onStatus?.('Loading landmark worker 0...');
     await this.workers[0].init(LANDMARK_MODEL_URL);
     onStatus?.('Loading landmark worker 1...');
     await this.workers[1].init(LANDMARK_MODEL_URL);
 
-    this.slots = [
-      new HandSlot(0, this.workers[0]),
-      new HandSlot(1, this.workers[1]),
-    ];
-
-    console.log('Two landmark workers initialized -- true parallel inference enabled');
-
+    console.log('Two landmark workers ready -- true parallel inference');
     this.ready = true;
     onStatus?.('Ready');
   }
@@ -301,11 +204,15 @@ export class HandTracker {
         }
       }
 
-      // TRUE PARALLEL: both hands infer simultaneously in separate workers
+      // TRUE PARALLEL: create ImageBitmaps and send to workers simultaneously
       const results = await Promise.all(this.slots.map(async (slot) => {
         if (!slot.active) return null;
 
-        const result = await slot.runLandmark(video, vw, vh);
+        // Create a bitmap from the current video frame (fast, GPU-backed)
+        const bitmap = await createImageBitmap(video);
+
+        // Worker does: crop + preprocess + inference + projection
+        const result = await slot.worker.infer(bitmap, slot.rect, vw, vh);
 
         if (result.handFlag > HAND_FLAG_THRESHOLD) {
           slot.landmarks = result.landmarks;
@@ -324,7 +231,6 @@ export class HandTracker {
         hands: results.filter(Boolean),
         debug: {
           rects: this.slots.filter(s => s.rect).map(s => s.rect),
-          lastCrop: this.slots[0]._lastCrop || this.slots[1]._lastCrop || null,
         },
       };
     } catch (err) {

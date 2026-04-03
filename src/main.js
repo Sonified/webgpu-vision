@@ -64,56 +64,7 @@ function drawHands(hands) {
 }
 
 function drawDebug(debug) {
-  // Draw rotated rects (the crop regions)
-  for (const rect of debug.rects) {
-    const cos = Math.cos(rect.angle) * 0.5;
-    const sin = Math.sin(rect.angle) * 0.5;
-    const w = rect.w, h = rect.h;
-
-    // 4 corners of the rotated rect (in pixel coords)
-    const corners = [
-      [rect.cx - sin * h - cos * w, rect.cy + cos * h - sin * w],
-      [rect.cx + sin * h - cos * w, rect.cy - cos * h - sin * w],
-      [rect.cx + sin * h + cos * w, rect.cy - cos * h + sin * w],
-      [rect.cx - sin * h + cos * w, rect.cy + cos * h + sin * w],
-    ];
-
-    ctx.strokeStyle = 'rgba(255, 200, 0, 0.8)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(corners[0][0], corners[0][1]);
-    for (let i = 1; i < 4; i++) {
-      ctx.lineTo(corners[i][0], corners[i][1]);
-    }
-    ctx.closePath();
-    ctx.stroke();
-
-    // Draw center
-    ctx.beginPath();
-    ctx.arc(rect.cx, rect.cy, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ff0';
-    ctx.fill();
-  }
-
-  // Draw crop preview in bottom-right corner
-  if (debug.lastCrop) {
-    const previewSize = 112;
-    const px = overlay.width - previewSize - 8;
-    const py = overlay.height - previewSize - 8;
-
-    const tmpCanvas = new OffscreenCanvas(debug.lastCrop.width, debug.lastCrop.height);
-    const tmpCtx = tmpCanvas.getContext('2d');
-    tmpCtx.putImageData(debug.lastCrop, 0, 0);
-
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px - 1, py - 1, previewSize + 2, previewSize + 2);
-    ctx.drawImage(tmpCanvas, px, py, previewSize, previewSize);
-
-    ctx.fillStyle = 'white';
-    ctx.font = '11px monospace';
-    ctx.fillText('crop preview', px + 2, py + previewSize - 4);
-  }
+  // Debug rects hidden -- uncomment to show bounding boxes
 }
 
 // FPS tracking
