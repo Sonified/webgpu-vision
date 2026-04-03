@@ -8,7 +8,6 @@ import { preprocessPalm, preprocessLandmark } from './preprocessing.js';
 const PALM_MODEL_URL = '/models/palm_detection_lite.onnx';
 const LANDMARK_MODEL_URL = '/models/hand_landmark_full.onnx';
 const HAND_FLAG_THRESHOLD = 0.5;
-const REDETECT_INTERVAL = 30;
 const LANDMARK_SIZE = 224;
 
 // Rate-limited logger
@@ -60,7 +59,6 @@ export class HandTracker {
       { active: false, rect: null, landmarks: null },
       { active: false, rect: null, landmarks: null },
     ];
-    this.framesSincePalmDetect = 0;
     this.ready = false;
     this.running = false;
   }
@@ -269,19 +267,17 @@ export class HandTracker {
     const vh = video.videoHeight;
 
     try {
-      const needPalmDetect =
-        !this.handSlots.some((s) => s.active) ||
-        this.framesSincePalmDetect >= REDETECT_INTERVAL;
+      // Run palm detection when there are empty slots (looking for new hands).
+      // Never touch slots that are already tracking.
+      const emptySlots = this.handSlots.filter(s => !s.active);
 
-      if (needPalmDetect) {
+      if (emptySlots.length > 0) {
         const { detections, letterbox } = await this.runPalmDetection(video);
 
-        this.handSlots.forEach(s => { s.active = false; s.rect = null; s.landmarks = null; });
+        for (const det of detections) {
+          if (emptySlots.length === 0) break;
 
-        for (let i = 0; i < Math.min(detections.length, 2); i++) {
-          const det = detections[i];
-
-          // Undo letterbox: model-normalized [0,1] -> video-normalized [0,1]
+          // Undo letterbox
           det.cx = (det.cx - letterbox.offsetX) / letterbox.scaleX;
           det.cy = (det.cy - letterbox.offsetY) / letterbox.scaleY;
           det.w = det.w / letterbox.scaleX;
@@ -291,17 +287,25 @@ export class HandTracker {
             kp.y = (kp.y - letterbox.offsetY) / letterbox.scaleY;
           }
 
-          // Skip detections outside the frame
           if (det.cy < -0.1 || det.cy > 1.1 || det.cx < -0.1 || det.cx > 1.1) continue;
 
-          // detectionToRect returns pixel coordinates
-          const rect = detectionToRect(det, vw, vh);
-          logSlot(`[slot ${i}] rect cx=${rect.cx.toFixed(0)} cy=${rect.cy.toFixed(0)} size=${rect.w.toFixed(0)} angle=${rect.angle.toFixed(2)}`);
+          // Skip if this detection overlaps an already-tracked hand
+          const detPx = det.cx * vw;
+          const detPy = det.cy * vh;
+          const overlapsTracked = this.handSlots.some(s => {
+            if (!s.active) return false;
+            const dx = s.rect.cx - detPx;
+            const dy = s.rect.cy - detPy;
+            return Math.sqrt(dx * dx + dy * dy) < s.rect.w * 0.5;
+          });
+          if (overlapsTracked) continue;
 
-          this.handSlots[i].active = true;
-          this.handSlots[i].rect = rect;
+          const rect = detectionToRect(det, vw, vh);
+          const slot = emptySlots.shift();
+          slot.active = true;
+          slot.rect = rect;
+          logSlot(`[new hand] cx=${rect.cx.toFixed(0)} cy=${rect.cy.toFixed(0)} size=${rect.w.toFixed(0)}`);
         }
-        this.framesSincePalmDetect = 0;
       }
 
       // Run landmark model sequentially
@@ -312,7 +316,6 @@ export class HandTracker {
         const result = await this.runLandmarkModel(video, slot.rect);
 
         if (result.handFlag > HAND_FLAG_THRESHOLD) {
-          console.log(`[HAND FOUND] handFlag=${result.handFlag.toFixed(3)}, tracking rect:`, JSON.stringify(this.landmarksToRect(result.landmarks, vw, vh)));
           slot.landmarks = result.landmarks;
           slot.rect = this.landmarksToRect(result.landmarks, vw, vh);
           results.push({ landmarks: result.landmarks, handedness: result.handedness });
@@ -341,28 +344,61 @@ export class HandTracker {
   }
 
   landmarksToRect(landmarks, imgW, imgH) {
+    // Ported from geaxgx mediapipe_utils.py hand_landmarks_to_rect()
+
+    // Rotation from wrist to averaged MCPs (more stable than single point)
     const wrist = landmarks[0];
-    const middle = landmarks[9];
-    const rotation = Math.PI / 2 - Math.atan2(-(middle.y - wrist.y), middle.x - wrist.x);
+    const indexMcp = landmarks[5];
+    const middleMcp = landmarks[9];
+    const ringMcp = landmarks[13];
+
+    // Target point: weighted average of MCPs (middle finger weighted 2x)
+    const tx = 0.25 * (indexMcp.x + ringMcp.x) + 0.5 * middleMcp.x;
+    const ty = 0.25 * (indexMcp.y + ringMcp.y) + 0.5 * middleMcp.y;
+
+    const rotation = Math.PI / 2 - Math.atan2(wrist.y - ty, tx - wrist.x);
     const angle = rotation - 2 * Math.PI * Math.floor((rotation + Math.PI) / (2 * Math.PI));
 
+    // Only use stable palm/MCP landmarks (no fingertips!)
+    const stableIds = [0, 1, 2, 3, 5, 6, 9, 10, 13, 14, 17, 18];
+    const pts = stableIds.map(i => [landmarks[i].x * imgW, landmarks[i].y * imgH]);
+
+    // Axis-aligned center of stable points
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const lm of landmarks) {
-      minX = Math.min(minX, lm.x * imgW);
-      minY = Math.min(minY, lm.y * imgH);
-      maxX = Math.max(maxX, lm.x * imgW);
-      maxY = Math.max(maxY, lm.y * imgH);
+    for (const [x, y] of pts) {
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    }
+    const acx = (minX + maxX) / 2;
+    const acy = (minY + maxY) / 2;
+
+    // Project points into rotated space, find bounds there
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    let rMinX = Infinity, rMinY = Infinity, rMaxX = -Infinity, rMaxY = -Infinity;
+    for (const [x, y] of pts) {
+      const dx = x - acx, dy = y - acy;
+      const rx = dx * cos + dy * sin;
+      const ry = -dx * sin + dy * cos;
+      rMinX = Math.min(rMinX, rx); rMinY = Math.min(rMinY, ry);
+      rMaxX = Math.max(rMaxX, rx); rMaxY = Math.max(rMaxY, ry);
     }
 
-    const longSide = Math.max(maxX - minX, maxY - minY);
-    const size = longSide * 2.0; // expand for margin
+    // Center in rotated space, then back to pixel space
+    const projCx = (rMinX + rMaxX) / 2;
+    const projCy = (rMinY + rMaxY) / 2;
+    const cx = cos * projCx - sin * projCy + acx;
+    const cy = sin * projCx + cos * projCy + acy;
 
-    return {
-      cx: (minX + maxX) / 2,
-      cy: (minY + maxY) / 2,
-      w: size,
-      h: size,
-      angle,
-    };
+    // Square bounding box from longer side, 2x expansion
+    const width = rMaxX - rMinX;
+    const height = rMaxY - rMinY;
+    const size = 2 * Math.max(width, height);
+
+    // Shift center slightly along rotation axis (0.1 * height)
+    const shiftCx = cx + 0.1 * height * sin;
+    const shiftCy = cy - 0.1 * height * cos;
+
+    return { cx: shiftCx, cy: shiftCy, w: size, h: size, angle };
   }
 }
