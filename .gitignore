@@ -1,6 +1,5 @@
 node_modules/
 dist/
-models/*.onnx
 reference/
 .DS_Store
 CLAUDE.md
