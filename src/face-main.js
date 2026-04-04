@@ -63,7 +63,7 @@ function drawDebug(debug) {
 
     // Crop preview in bottom-right corner
     const previewSize = 128;
-    const px = overlay.width - previewSize - 8;
+    const px = 8; // draws on left in canvas, appears on right after CSS scaleX(-1)
     const py = overlay.height - previewSize - 8;
 
     ctx.save();
