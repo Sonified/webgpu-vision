@@ -1,7 +1,7 @@
 // Face detection worker: receives ImageBitmap, does GPU letterbox + inference + decode + NMS.
 // Returns detections with keypoints, ready for downstream processing.
 
-import * as ort from 'onnxruntime-web/webgpu';
+import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.mjs';
 import { generateFaceAnchors, decodeFaceDetections } from './face-anchors.js';
 import { weightedNMS } from './face-nms.js';
 

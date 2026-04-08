@@ -1,7 +1,7 @@
 // Palm detection worker: receives ImageBitmap, does GPU letterbox + inference + decode + NMS.
 // Returns detections with keypoints, ready for slot assignment.
 
-import * as ort from 'onnxruntime-web/webgpu';
+import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.mjs';
 import { generateAnchors, decodeDetections } from './anchors.js';
 import { weightedNMS } from './nms.js';
 
@@ -200,32 +200,48 @@ self.onmessage = async (e) => {
 
   if (type === 'init') {
     try {
+      console.log('[palm-worker] init started, modelUrl:', e.data.modelUrl);
+
       // Generate anchors
       anchors = generateAnchors();
+      console.log('[palm-worker] anchors generated:', anchors.length);
 
       // Try GPU letterbox
       if (typeof navigator !== 'undefined' && navigator.gpu) {
+        console.log('[palm-worker] navigator.gpu available, requesting adapter...');
         try {
           await initGPU();
           useGPU = true;
-          console.log('Palm worker: WebGPU letterbox enabled');
+          console.log('[palm-worker] WebGPU letterbox enabled');
         } catch (err) {
-          console.warn('Palm worker: GPU letterbox unavailable:', err.message);
+          console.warn('[palm-worker] GPU letterbox unavailable:', err.message);
         }
+      } else {
+        console.warn('[palm-worker] navigator.gpu not available, using canvas letterbox');
       }
 
       // Load palm detection model
+      console.log('[palm-worker] fetching model...');
+      const modelResp = await fetch(e.data.modelUrl);
+      console.log('[palm-worker] model fetch status:', modelResp.status, modelResp.ok);
+      if (!modelResp.ok) throw new Error(`Model fetch failed: ${modelResp.status} ${e.data.modelUrl}`);
+
+      console.log('[palm-worker] creating InferenceSession with webgpu EP...');
       session = await ort.InferenceSession.create(e.data.modelUrl, {
         executionProviders: ['webgpu'],
         graphOptimizationLevel: 'all',
       });
+      console.log('[palm-worker] session created, inputs:', session.inputNames, 'outputs:', session.outputNames);
 
       // Warmup
+      console.log('[palm-worker] running warmup...');
       const warmup = new ort.Tensor('float32', new Float32Array(PALM_SIZE * PALM_SIZE * 3), [1, PALM_SIZE, PALM_SIZE, 3]);
       await session.run({ [session.inputNames[0]]: warmup });
+      console.log('[palm-worker] warmup done');
 
       self.postMessage({ type: 'ready', gpuLetterbox: useGPU });
     } catch (err) {
+      console.error('[palm-worker] init error:', err);
       self.postMessage({ type: 'error', message: err.message });
     }
   }
