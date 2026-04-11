@@ -210,11 +210,11 @@ These are tracked here so they do not get lost; none are blocking a release.
 
 ### Hand tracking: detect and recover from double-mapped hands
 
-The current pipeline runs two parallel hand-landmark workers (workers 0 and 1) to track up to two hands at once. There is a known failure mode where both workers latch onto the **same physical hand** — usually after one hand briefly leaves the frame and re-enters, or after a tracking glitch. When this happens, we burn one worker on a duplicate detection and the user's other hand goes untracked even when it is clearly visible.
+The current pipeline runs two parallel hand-landmark workers (workers 0 and 1) to track up to two hands at once. There is a known failure mode that triggers when **two hands clap or come into contact**: the palm detector cannot cleanly separate them, and both workers end up locking their ROIs onto the **same physical hand**. When the hands then separate, the workers stay stuck on the one hand they can both see, and the other hand is silently untracked even though it is clearly in frame.
 
-Fix: at the end of each frame, compare the two landmark sets. If they overlap in image space beyond a threshold (for example, palm centers within N pixels and bounding boxes overlapping by more than 50%), declare a duplicate, **free worker 1 from its current ROI lock**, and let it fall back to running palm detection again on the next frame to find a different hand. The de-duplication runs on the main thread after `Promise.all`, so it adds essentially no latency.
+Fix: at the end of each frame, compare the two landmark sets. If they overlap in image space beyond a threshold (for example, palm centers within N pixels and bounding boxes overlapping by more than 50%) for more than a brief moment, declare a duplicate, **free one of the workers from its current ROI lock**, and let it fall back to running palm detection on the next frame to find the other hand. The de-duplication runs on the main thread after `Promise.all`, so it adds essentially no latency.
 
-Watch out for: legitimate two-hand-clasped poses where the hands really are overlapping. Use a slightly tighter overlap threshold than naive IoU, and require duplication to persist for 2-3 frames before acting on it, to avoid flapping.
+Watch out for: legitimate hands-clasped poses where the hands really are overlapping in the image. Require the duplication to persist for 2-3 frames before acting on it (to avoid flapping during the actual clap moment), and use a slightly tighter overlap threshold than naive IoU.
 
 ### Mobile / phone support: WebGPU Vision not loading
 
