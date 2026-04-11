@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>3D Parallax + Hand Tracking Demo</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👋</text></svg>">
+
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0a1a; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
@@ -107,7 +109,7 @@
   <div class="section-label">Hands</div>
   <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="500" step="1" value="10"><span class="param-val" id="hand-floor-val">0.10</span></div>
   <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="1" value="35"><span class="param-val" id="hand-beta-val">3.5</span></div>
-  <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy</button></div>
+  <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
 <div id="status">Click Start to enable camera</div>
@@ -146,7 +148,7 @@ import * as THREE from 'three';
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
 // ============================================================
-const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2' };
+const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'detector' };
 function getSetting(key) { const v = localStorage.getItem(key); return v !== null ? v : DEFAULTS[key]; }
 function setSetting(key, val) { localStorage.setItem(key, val); }
 
@@ -490,7 +492,7 @@ document.getElementById('copy-settings-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(JSON.stringify(settings, null, 2));
   const btn = document.getElementById('copy-settings-btn');
   btn.textContent = 'Copied!';
-  setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+  setTimeout(() => { btn.textContent = 'Copy Settings'; }, 1200);
 });
 
 // ============================================================
@@ -921,9 +923,12 @@ function processWebGPUHands() {
   });
 }
 
-let faceMode = 'landmark'; // 'landmark' or 'detector'
-document.getElementById('face-mode').addEventListener('change', (e) => {
+let faceMode = getSetting('faceMode'); // 'landmark' or 'detector'
+const faceModeSelect = document.getElementById('face-mode');
+faceModeSelect.value = faceMode;
+faceModeSelect.addEventListener('change', (e) => {
   faceMode = e.target.value;
+  setSetting('faceMode', faceMode);
   console.log('[BENCH] Face mode switched to:', faceMode);
 });
 
@@ -984,9 +989,16 @@ const video = document.getElementById('webcam');
 const clock = new THREE.Clock();
 let frameCount = 0, lastFpsTime = 0, winShowing = false;
 let activeBackend = getSetting('backend');
+let lastAnimateTimestamp = -1;
 
 
 function animate(timestamp) {
+  // Dedupe parallel animate chains: when the tab is hidden then re-shown,
+  // the throttled-old rAF and the visibilitychange-spawned new rAF can both
+  // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
+  // the second one returns here and the chain merges back into one.
+  if (timestamp === lastAnimateTimestamp) return;
+  lastAnimateTimestamp = timestamp;
   if (document.hidden) return;
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
