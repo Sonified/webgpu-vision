@@ -1,0 +1,232 @@
+# WebGPU Vision: Work Plan
+
+This document is the single source of truth for the work to bring this repo from "library + basic wireframe demos" to "library + comparison hub + showcase game demo." It exists so the next working session does not need to rediscover context.
+
+Created: 2026-04-11.
+Source repo for the in-flight work: `../3d-parallax-head-hand-tracking-demo` (the patent disclosure repo, where the parallax demo originally lived). That repo is **read-only with respect to this migration** — files are copied out, never moved. Its git history is load-bearing for an unrelated patent disclosure timeline.
+
+## Context
+
+Until now, this repo has held the WebGPU Vision library plus two minimal wireframe demos:
+- `index.html`: hand tracking wireframe overlay
+- `face.html`: face landmark wireframe overlay
+
+The richer demonstration of what the library can do (head-coupled 3D parallax, hand-driven projectile throwing, MediaPipe vs WebGPU Vision A/B comparison, persisted UI settings, One Euro filtering, etc.) lived in `../3d-parallax-head-hand-tracking-demo/index.html`. That demo also carried an in-tree copy of the library at `gpu-vision/src/`, which has drifted ahead of canonical `webgpu-vision/src/` with real performance improvements.
+
+This work plan shifts the center of gravity. After Phase 1, the showcase demo lives in this repo. After Phase 2, this repo also has a unified one-stop comparison hub at the root.
+
+## Library divergence (one-time upstream)
+
+The parallax repo's `gpu-vision/src/` is **the better code**. Concrete differences:
+
+- `palm-worker.js`: contains a complete `gpuLetterboxDirect` path (about 50 lines) that keeps letterbox output on the GPU using a shared ONNX/WebGPU device and `Tensor.fromGpuBuffer()`, eliminating the CPU readback. Canonical webgpu-vision is missing this entire function and has no shared-device path.
+- `palm-worker.js`: `initGPU()` accepts a shared device. Canonical creates its own device with no sharing path.
+- `palm-worker.js`: `useGPUDirect` flag governs the new path.
+- `pipeline.js`: keeps `enableMemPattern: true` in the ORT session options. Canonical removed it.
+- `model-urls.js`: only difference is `LOCAL_BASE` (`/gpu-vision/models` vs `/models`), which is a path-prefix artifact of where the library was mounted. Canonical's value is correct for this repo.
+
+The only thing canonical has that the parallax copy lacks is some extra `console.error` diagnostics in worker setup, nothing functional.
+
+**Action: copy the parallax repo's improved files into canonical, except `model-urls.js` (keep canonical's `LOCAL_BASE`).**
+
+Files to copy from `../3d-parallax-head-hand-tracking-demo/gpu-vision/src/` into this repo's `src/`:
+- `palm-worker.js`
+- `landmark-worker.js`
+- `pipeline.js`
+- `face-detection-worker.js`
+- `face-landmark-worker.js`
+- `face-blendshape-worker.js`
+
+Plus the model file that differs:
+- `../3d-parallax-head-hand-tracking-demo/gpu-vision/models/palm_detection_lite.onnx` → `models/palm_detection_lite.onnx` (the parallax repo also has a `.onnx.backup` next to it; do not copy the backup)
+
+After upstreaming, verify both existing demos (`index.html`, `face.html`) still run via `npm run dev` before moving on.
+
+## Phase 1: Center-of-gravity shift (TODAY)
+
+Goal: ship the showcase demo in this repo, untouched-as-possible, importing the library from `../../src/`. No surgery on the demo, no new functionality.
+
+### Steps
+
+1. **Upstream library improvements** (see "Library divergence" above).
+
+2. **Create `demos/ball-toss/`** (folder name is a placeholder; the demo is evolving toward a ball-toss game and will be renamed once it has a real name).
+   - Copy `../3d-parallax-head-hand-tracking-demo/index.html` → `demos/ball-toss/index.html`.
+   - Copy `../3d-parallax-head-hand-tracking-demo/coi-serviceworker.js` → `demos/ball-toss/coi-serviceworker.js` (the demo needs COOP/COEP for WebGPU).
+   - Copy `../3d-parallax-head-hand-tracking-demo/face-worker.js` → `demos/ball-toss/face-worker.js` (the MediaPipe-backend worker; the WebGPU-backend pipeline is loaded from the shared library).
+   - Copy `../3d-parallax-head-hand-tracking-demo/hand-worker.js` → `demos/ball-toss/hand-worker.js`.
+   - Copy `../3d-parallax-head-hand-tracking-demo/mediapipe-vision.js` → `demos/ball-toss/mediapipe-vision.js`.
+   - Edit `demos/ball-toss/index.html`: change the dynamic library imports
+     - `await import('./gpu-vision/src/pipeline.js')` → `await import('../../src/pipeline.js')`
+     - `await import('./gpu-vision/src/face-pipeline.js')` → `await import('../../src/face-pipeline.js')`
+   - Models: the demo loads models via `model-urls.js`, which on `localhost` reads from `/models` and in production reads from `https://models.now.audio`. Both work without changes for this repo's directory layout, so no model copy needed.
+
+3. **Verify Vite serves `demos/ball-toss/`.** This repo already has `vite.config.js` with COOP/COEP headers. Vite serves any HTML file under the root, so `http://localhost:5173/demos/ball-toss/` should Just Work. If it does not, add `demos/ball-toss/index.html` to the rollup `input` map in `vite.config.js`.
+
+4. **Update `README.md`.** Add a "Demos" section near the top:
+   ```
+   ## Demos
+   - `index.html`: hand tracking wireframe (the minimum example)
+   - `face.html`: face landmark wireframe
+   - `demos/ball-toss/`: full showcase — head-coupled 3D parallax, hand-driven projectiles, MediaPipe vs WebGPU Vision A/B toggle, persisted settings, One Euro filtering
+   ```
+
+5. **Smoke test.**
+   - `npm run dev`
+   - Visit `/` (hand wireframe), `/face.html` (face wireframe), `/demos/ball-toss/` (showcase)
+   - All three should work; the showcase should let you toggle between WebGPU and MediaPipe backends and behave identically to how it does in the source repo.
+
+6. **Commit and push.**
+
+### What Phase 1 explicitly does NOT do
+- Does not touch `index.html` or `face.html` (still the basic wireframes).
+- Does not strip Three.js or refactor the showcase.
+- Does not split MediaPipe into "original" vs "workers" backends.
+- Does not delete anything.
+
+## Phase 2: Unified one-stop hub (NEXT SESSION) — PARTIALLY DONE
+
+Goal: replace the current basic hand-wireframe `index.html` with a single comparison playground that subsumes both wireframes and gives users one place to A/B everything.
+
+### Already in place (committed in `2b0144d`, tagged `snapshot-before-merge`)
+
+A prior session already moved meaningfully toward this hub, in `index.html` and `src/main.js`. Concrete progress:
+
+- Track toggles for hands and face, persisted to `localStorage`
+- Number-of-faces selector with live `FaceTracker` reinit
+- Blendshapes enable/show toggles with full dependency cascade (face off forces blendshapes off forces panel off)
+- 51-bar live blendshape display panel with hardcoded FACS names
+- Visibility-based render pause (loop stops when tab hidden)
+- Structured JSON perf logging: `{ engine, active, fps, ms, hands, faces }`
+
+### What still needs to be done
+
+- **Backend dropdown** (the missing centerpiece): WebGPU Vision / MediaPipe (workers) / MediaPipe (original main-thread). The current hub WIP only runs WebGPU Vision. Wiring up the MediaPipe paths is the main net-new work.
+- **`face.html` deletion**, after the hub is verified covering all face-tracking use cases (including the blendshape panel layout that was originally on `face.html`).
+- **Hand-side parity check**: confirm the hub draws hand wireframes the same way the existing minimal `index.html` did before it was overwritten by hub WIP. If anything regressed, port it from git history.
+- **README update** to describe the hub as the primary entry point.
+
+### Hub spec (the one-stop shop)
+
+A single page where the user picks what to track and which backend to run:
+
+- **Track toggles**: head on/off, hands on/off, hand count (1 or 2)
+- **Backend dropdown**: WebGPU Vision / MediaPipe (workers) / MediaPipe (original main-thread)
+  - "MediaPipe (workers)" is the existing worker-based path from the parallax demo (`face-worker.js`, `hand-worker.js`)
+  - "MediaPipe (original)" is a new code path that runs MediaPipe on the main thread, for full A/B comparison. This is the only piece of new implementation in Phase 2.
+- **Future toggle (Phase 3)**: face blendshapes display on/off
+- **Visualization**: video feed + 2D wireframe overlays. **No Three.js, no 3D scene, no projectiles.** Pure tracking visualization.
+
+### Steps (revised in light of existing WIP)
+
+The original plan was "start from a copy of `demos/ball-toss/index.html` and strip Three.js." That is no longer the right starting point, because the current hub WIP in `index.html` is already a stripped, 2D-only structure with most of the toggle UI in place. **Build on top of it instead.**
+
+1. **Start from current `index.html` + `src/main.js`** (the snapshot-before-merge state). Do not re-derive from the parallax demo.
+
+2. **Add the backend dropdown.** Insert a `<select id="backend-select">` with options `WebGPU Vision`, `MediaPipe (workers)`, `MediaPipe (original)`. Persist selection to `localStorage`. Refactor `src/main.js` so the per-frame work goes through one of three init/teardown pairs depending on selection. The "MediaPipe (workers)" path can be lifted from `demos/ball-toss/face-worker.js` and `hand-worker.js`. The "MediaPipe (original)" path is new code: import MediaPipe Tasks Vision and run on the main thread.
+
+3. **Verify hand wireframe rendering** still works exactly as the pre-WIP `index.html` did. The hub WIP added face/blendshape support but I have not yet verified it left the hand-tracking display intact. Diff against `7dbb45e` (last commit before the WIP) and confirm hand drawing was preserved.
+
+4. **Verify face wireframe + blendshape panel** matches what `face.html` provided.
+
+5. **Delete `face.html`** once steps 3 and 4 pass.
+
+6. **README update** describing the hub as the primary entry point.
+
+### Steps (original plan, now obsolete — kept for reference)
+
+~~1. **Start from a copy.** Copy `demos/ball-toss/index.html` → working file for the new `index.html`.~~
+
+~~2. **Strip Three.js and the 3D scene.** Remove:~~
+   - The `three` import map and `import * as THREE`
+   - The scene/camera/renderer/lighting setup (~lines 162 onward in the source)
+   - The background grid, cube grid, projectile pool, hand-skeleton 3D meshes
+   - The parallax controls (`#parallax-select`, `#parallax-amount`, `#parallax-depth`)
+   - The animation loop's 3D rendering side
+   Keep:
+   - The video element + 2D overlay canvas
+   - The backend dropdown and its `initWebGPUBackend` / `initMediaPipeBackend` paths
+   - The persisted-settings logic
+   - The One Euro filter wiring (still useful for smoothing 2D landmarks)
+   - The HUD (FPS, latency, backend display)
+
+3. **Add 2D wireframe rendering** to the overlay canvas. The basic wireframes in current `index.html` and `face.html` already do this — port that drawing code into the new hub.
+
+4. **Add the head/hands track toggles.** Wire them so the appropriate worker(s) are spun up or torn down dynamically.
+
+5. **Wire up "MediaPipe (original)" backend.** Add a new init/teardown pair that runs MediaPipe Tasks Vision on the main thread (no worker). This is the only net-new code in Phase 2.
+
+6. **Verify against the existing wireframes.** With backend = "WebGPU Vision" and head off, hands on, the new hub should look and behave identically to the current `index.html`. With head on, hands off, it should match `face.html`.
+
+7. **Replace `index.html` with the new hub.** Delete `face.html` only after the hub is verified working in all combinations.
+
+8. **README update.** Replace the "Demos" section with the hub description plus the showcase link.
+
+### Phase 2 risks / things to watch
+- The source `index.html` mixes 2D pose state with 3D mesh updates. The strip pass needs to keep the state-update side and remove only the rendering side. Easy to accidentally drop a state update.
+- "MediaPipe (original)" needs to load the same WASM and models the worker version uses. Make sure the WASM URLs match so we are not measuring CDN cold-start differences in the comparison.
+- COI service worker is still required for WebGPU; keep `coi-serviceworker.js` registered in the new hub.
+
+## Phase 3: Polish and longer-term
+
+These are tracked here so they do not get lost; none are blocking a release.
+
+### Demo polish
+- Rename `demos/ball-toss/` to whatever the game ends up being called.
+- Build out the actual ball-toss game mechanics (currently the demo throws projectiles when you pinch; the full game is TBD).
+- Add a "blendshape display" toggle to the hub (face blendshape worker already exists in `src/face-blendshape-worker.js`; just needs UI).
+
+### Model provenance and hosting
+Open question: did we convert the ONNX models ourselves from MediaPipe weights, or did we download pre-converted ones? This matters for the open-source story. Investigation steps:
+- Check this repo and the parallax repo for any conversion scripts (`*.py`, `convert*`, `onnx*` outside `node_modules`).
+- Check git history of `models/` for the original commit message.
+- If we converted: document the conversion process in `MODELS.md` for reproducibility.
+- If we downloaded: confirm the source license permits redistribution and credit it in `models/LICENSE.md` (which already exists; verify it covers all five files).
+
+Hosting is currently `https://models.now.audio` in production via [model-urls.js](src/model-urls.js). That is fine for now. Longer term, decide whether to host on GitHub Releases, HuggingFace, or keep `models.now.audio`.
+
+### Library structure
+- The PReLU decomposition documented in `PRELU_DECOMPOSITION.md` is core to the face landmark model running on WebGPU. Worth a callout in the README for credibility.
+- The benchmark in `benchmark/` should be wired into the hub eventually so users can run their own A/B and see numbers, not just animation.
+
+### Documentation
+- `ARCHITECTURE.md` is good. Add a "Demos" section pointing to the hub and the showcase.
+- The "Hold my bear" line in the README is gold. Keep it.
+
+## File inventory: what comes from where
+
+### From `../3d-parallax-head-hand-tracking-demo/` into `webgpu-vision/`
+
+| Source | Destination | Phase | Notes |
+|---|---|---|---|
+| `gpu-vision/src/palm-worker.js` | `src/palm-worker.js` | 1 | Has zero-copy GPU letterbox path |
+| `gpu-vision/src/landmark-worker.js` | `src/landmark-worker.js` | 1 | |
+| `gpu-vision/src/pipeline.js` | `src/pipeline.js` | 1 | Keeps `enableMemPattern: true` |
+| `gpu-vision/src/face-detection-worker.js` | `src/face-detection-worker.js` | 1 | |
+| `gpu-vision/src/face-landmark-worker.js` | `src/face-landmark-worker.js` | 1 | |
+| `gpu-vision/src/face-blendshape-worker.js` | `src/face-blendshape-worker.js` | 1 | |
+| `gpu-vision/models/palm_detection_lite.onnx` | `models/palm_detection_lite.onnx` | 1 | Do not copy `.backup` file |
+| `index.html` | `demos/ball-toss/index.html` | 1 | Fix two `gpu-vision/src/` import paths |
+| `coi-serviceworker.js` | `demos/ball-toss/coi-serviceworker.js` | 1 | |
+| `face-worker.js` | `demos/ball-toss/face-worker.js` | 1 | MediaPipe backend worker |
+| `hand-worker.js` | `demos/ball-toss/hand-worker.js` | 1 | MediaPipe backend worker |
+| `mediapipe-vision.js` | `demos/ball-toss/mediapipe-vision.js` | 1 | MediaPipe loader shim |
+
+### Files in `webgpu-vision/` that change
+
+| File | Phase | Change |
+|---|---|---|
+| `src/*` (six files above) | 1 | Replaced with parallax repo versions |
+| `models/palm_detection_lite.onnx` | 1 | Replaced |
+| `README.md` | 1 | Add "Demos" section |
+| `vite.config.js` | 1 if needed | Add `demos/ball-toss/index.html` to rollup input only if Vite does not auto-serve it |
+| `index.html` | 2 | Replaced with one-stop hub |
+| `face.html` | 2 | Deleted after hub verified |
+| `README.md` | 2 | Update "Demos" section |
+
+## Open questions parked for later
+
+1. Model provenance (see Phase 3).
+2. Final name for the ball-toss demo and folder.
+3. Whether to land the benchmark UI inside the hub or keep it as a separate page.
+4. Whether to publish the library to npm. If yes, the demo import paths will switch from `../../src/` to `webgpu-vision`.
