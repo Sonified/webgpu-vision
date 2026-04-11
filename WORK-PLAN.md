@@ -5,6 +5,20 @@ This document is the single source of truth for the work to bring this repo from
 Created: 2026-04-11.
 Source repo for the in-flight work: `../3d-parallax-head-hand-tracking-demo` (the patent disclosure repo, where the parallax demo originally lived). That repo is **read-only with respect to this migration** — files are copied out, never moved. Its git history is load-bearing for an unrelated patent disclosure timeline.
 
+## How to run the ball-toss demo
+
+```bash
+cd /Users/robertalexander/GitHub/webgpu-vision
+npm install   # only needed first time
+npm run dev
+```
+
+Then open **http://localhost:5173/demos/ball-toss/** in Chrome (or any browser with WebGPU support). Allow camera access. The dropdown lets you toggle between WebGPU Vision and MediaPipe backends for direct comparison.
+
+The other two demos still live at:
+- **http://localhost:5173/** — hand tracking wireframe (one-stop hub work-in-progress)
+- **http://localhost:5173/face.html** — face landmark + blendshape wireframe (will be deleted in Phase 2)
+
 ## Context
 
 Until now, this repo has held the WebGPU Vision library plus two minimal wireframe demos:
