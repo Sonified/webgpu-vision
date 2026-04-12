@@ -319,6 +319,32 @@ The original plan was "start from a copy of `demos/ball-toss/index.html` and str
 
 These are tracked here so they do not get lost; none are blocking a release.
 
+### Investigate: why hand pipeline gets ~10x speedup but face only ~2-3x
+
+Live ball-toss bench on M1 Max, post-Phase-1.5, shows:
+
+| | MediaPipe | WebGPU Vision | Speedup |
+|---|---|---|---|
+| Hand (2 hands) | 40-48ms mean, 56-60ms p95 | 0.7-6ms mean, 11-16ms p95 | ~8-10x |
+| Face Detector (BlazeFace) | 18-21ms mean, 27-30ms p95 | 7-8ms mean, 11ms p95 | ~2.5-3x |
+| Face Landmark (FaceMesh) | 27-31ms mean, 37-38ms p95 | 13.5ms mean, 20ms p95 | ~2x |
+
+The hand delta is much bigger than the face delta. **Why** is worth understanding before we publish numbers, because the answer shapes the pitch.
+
+Hypotheses to test (in rough order of likely contribution):
+
+1. **Two-hand parallelism on our side, sequential cascade on MediaPipe's side.** Our `HandTracker` runs the two landmark workers under `Promise.all` so they execute on separate worker threads in true parallel. MediaPipe's `HandLandmarker` runs the per-hand landmark cascade sequentially within a single graph. So at 2 hands, our advantage is roughly (cascade-overhead-removal) x (2x parallelism). Face has no equivalent — only one face, no parallelism axis. To test: rerun both backends at `numHands=1`. If WGPU hand speedup at 1 hand drops to ~3-5x, parallelism is the dominant factor.
+
+2. **Cascade depth = readback count.** MediaPipe pays a `glReadPixels` between every model in a cascade. Hand cascade for 2 hands = 1 palm detect + 2 landmark = 3 model calls = 3 readbacks. Face landmark cascade = 1 detect + 1 landmark = 2 readbacks. More readbacks per frame = more pain we save by removing them.
+
+3. **Model size & inference time.** Hand landmark is a smaller model than face landmark (3.9 MB vs 4.8 MB, but face mesh runs at 256x256 which is more pixels). Smaller/cheaper inference = readback is a bigger fraction of total time = bigger relative win when readback is removed. Face mesh inference itself is heavier so removing readback is a smaller fraction of the total.
+
+4. **PReLU decomposition tax (face-only headwind).** Our face landmark model has 69 PReLU ops decomposed into Relu+Neg+Mul+Add for WebGPU compatibility. MediaPipe's TFLite has PReLU as a native op. So the face landmark inference has a small structural disadvantage on our side that the hand landmark does not. See [PRELU_DECOMPOSITION.md](PRELU_DECOMPOSITION.md).
+
+How to investigate: rerun the ball-toss bench with `numHands=1` (eliminates parallelism), then with the hand model running through a single landmark worker (eliminates per-hand parallelism while keeping the same cascade), and compare deltas. The numbers should tell us which hypothesis carries the most weight. Worth 30 minutes of experiment time before any public benchmark publication.
+
+
+
 ### Hand tracking: detect and recover from double-mapped hands
 
 The current pipeline runs two parallel hand-landmark workers (workers 0 and 1) to track up to two hands at once. There is a known failure mode that triggers when **two hands clap or come into contact**: the palm detector cannot cleanly separate them, and both workers end up locking their ROIs onto the **same physical hand**. When the hands then separate, the workers stay stuck on the one hand they can both see, and the other hand is silently untracked even though it is clearly in frame.
@@ -369,6 +395,88 @@ Hosting is currently `https://models.now.audio` in production via [model-urls.js
 ### Documentation
 - `ARCHITECTURE.md` is good. Add a "Demos" section pointing to the hub and the showcase.
 - The "Hold my bear" line in the README is gold. Keep it.
+
+## Phase 4: Pure GPU pipeline (the real hold-my-bear endgame)
+
+**Status:** designed and parked. Read this carefully before starting — it is an architectural change to the worker contract.
+
+### The realization
+
+Phase 1.5 killed CPU readbacks **inside** the inference cascade. Camera frame -> letterbox -> detect -> warp -> landmark all stays on the GPU, all stages share an ONNX RT WebGPU device, every model-to-model handoff is via `Tensor.fromGpuBuffer()`. That is the headline win and it shipped.
+
+But the workers' final output is **a JS `Float32Array` returned across the worker boundary**, which means the landmark coordinates get **read back from GPU to CPU at the very end** even when the consumer is going to turn around and draw them on screen — the most GPU-native operation imaginable. Worse, the existing demos then draw the wireframes via **Canvas2D** (`ctx.lineTo`), which is the slowest, most legacy 2D API the browser ships, in a project literally called WebGPU Vision. The whole identity of the library says "GPU never asks CPU for permission" and the very last step of the pipeline asks the CPU to draw lines.
+
+In absolute perf terms on M1 Max this is microseconds, not milliseconds. It is not a bottleneck on current hardware. **But it is thematically incoherent**, it stops being free on weaker hardware (Chromebooks, phones), and it blocks the spec-pure version of the library from existing. Worth fixing as its own focused phase, after the user-facing work in Phases 2 and 3 is done.
+
+### What "pure GPU" actually means
+
+End to end, with no readbacks anywhere unless the consumer explicitly opts in:
+
+```
+camera frame (GPU texture)
+  -> letterbox (compute, GPU buffer)
+  -> detect inference (GPU tensor in/out)
+  -> anchor decode + NMS (still CPU today, see option below)
+  -> warp (compute, GPU buffer)
+  -> landmark inference (GPU tensor in/out)
+  -> landmark coords land in a GPU buffer
+  -> bound directly as a vertex buffer to a render pipeline
+  -> drawn via WebGPU render pass to the canvas
+  -> swapchain present
+```
+
+Zero `mapAsync`, zero `Float32Array`, zero `ctx.lineTo`, zero `glReadPixels` anywhere.
+
+### The worker contract change (the architectural piece)
+
+Today every landmark worker postMessages a `Float32Array` of coordinates back to the main thread. That is the readback we need to make optional.
+
+New contract: `init({ outputMode: 'cpu' | 'gpu' })`.
+
+- **`'cpu'` (default, current behavior):** workers read landmarks back and post a `Float32Array`. Existing apps keep working with no changes. Apps that need landmarks in JS for gesture detection, parallax math, One Euro filtering, etc all stay on this path.
+- **`'gpu'` (new):** workers do NOT read back. Instead they expose a `GPUBuffer` handle that the main thread (or another worker on the same shared device) can bind directly. The postMessage carries metadata (frame id, count, layout) but no coordinate data. The consumer uses the buffer in a render pipeline.
+
+The hard part is that **`GPUBuffer` is not transferable across worker boundaries**. So `'gpu'` mode requires either:
+- (a) all workers AND the renderer to share a single ONNX-RT-owned WebGPU device that lives in the main thread, with the landmark workers writing into a buffer the main thread also has a handle to, or
+- (b) the workers expose a way for the main thread to import a buffer reference (some browsers allow this via `device.importExternalBuffer`-like APIs, but support is uneven).
+
+Option (a) is the more portable path. It implies a refactor where the main thread owns the WebGPU device and the workers receive it via a structured-clone-able handle (or are kicked out entirely in favor of main-thread orchestration with off-thread inference via `OffscreenCanvas`). Either way, this is a real change to how `pipeline.js` and `face-pipeline.js` are wired, not a one-line patch.
+
+### Three implementation options for the drawing side
+
+Once landmarks live in a `GPUBuffer`, drawing becomes a pure WebGPU render pipeline. Three ways to wire it:
+
+1. **Three.js `WebGPURenderer` for ball-toss specifically.** Three.js ships a WebGPU backend at `three/addons/renderers/webgpu/WebGPURenderer.js`. The ball-toss demo currently uses `WebGLRenderer` (the default). Switching to `WebGPURenderer` is a small change at the renderer instantiation, but the materials, lights, and post-processing the demo uses need to be checked for parity. Some features still lag the WebGL renderer. Once switched, the wireframe overlays become `THREE.LineSegments` / `THREE.Points` with a `BufferGeometry` whose vertex buffer **is the landmark `GPUBuffer` from the worker**. Zero copy. The whole visual stack is then WebGPU end-to-end. Lowest effort for the highest visible payoff in the showcase demo.
+
+2. **Raw WebGPU render pipeline written by us.** ~100 lines of WGSL + JS. Vertex shader takes a uniform buffer of landmark positions, fragment shader does line + point rasterization. Used by the minimal demos (`/index.html`, `/face.html`) and exposed as a library helper `drawWireframeWebGPU(canvas, gpuBuffer, schema)`. Zero deps, zero Three.js, total control. The library-correct answer because it does not make webgpu-vision secretly require Three.js.
+
+3. **Both — Three.js `WebGPURenderer` for ball-toss, raw WebGPU helper for the minimal demos and as a public library export.** Best of both. Ball-toss gets the full Three.js scene graph on WebGPU because it has a real 3D scene with lighting, shadows, projectiles. Library users who just want a drop-in wireframe overlay get the lightweight helper. This is the recommended path.
+
+### Anchor decode + NMS: should they move to compute too?
+
+Currently both the hand and face pipelines decode anchors and run weighted NMS on the **CPU**, after reading the detection model's output back as a `Float32Array`. That is a separate readback we have not addressed.
+
+For "pure GPU" to be honest end-to-end, anchor decode and NMS need to be compute shaders too. Anchor decode is trivially parallel (one workgroup per anchor, multiply-add math). NMS is harder because it is order-dependent and weighted NMS specifically needs to average overlapping detections by score — there is published work on GPU NMS approaches (parallel reduction, sweep-and-prune, etc) but it is not free to implement.
+
+Defer this until after the worker contract change lands. It is a meaningful piece of work on its own and it is downstream of the contract decision.
+
+### Order of operations within Phase 4
+
+1. Design and prototype the `outputMode: 'gpu'` worker contract on **one** worker (suggest: `landmark-worker.js`, since it is the simplest cascade endpoint). Confirm the cross-worker buffer sharing approach actually works on M1 Max Chrome, then on a couple of secondary platforms.
+2. Land option 2 first (raw WebGPU wireframe helper), wired to that one worker, with one demo using it end-to-end. Smallest possible vertical slice. Validate that the GPU-only path is actually faster or at least at parity with the readback path (it should be, especially on weaker hardware).
+3. Roll the contract change out to the other workers (palm, face detection, face landmark, face blendshape) once the pattern is proven.
+4. Add option 1 (Three.js `WebGPURenderer` swap) for ball-toss.
+5. Move anchor decode + NMS to compute shaders, removing the last detection-side readback.
+6. Update the README and ARCHITECTURE.md to describe the pure-GPU path as the default and CPU readback as opt-in.
+
+### Why this is Phase 4 and not "do it now"
+
+- It is not a perf bottleneck on current hardware. Phase 2 (the unified comparison hub) and the Phase 3 polish items move the library from "works" to "people can actually use it." Phase 4 moves it from "works in spirit" to "works in spec." That ordering matches user impact.
+- The worker contract change deserves careful design and a clean session, not a rushed implementation jammed between two other in-flight things.
+- Doing Phase 4 before Phase 2 means Phase 2 (the hub) would have to be ported twice — once as Canvas2D, once as WebGPU. Doing Phase 2 first, then Phase 4, lets us do the WebGPU port once across all the demos at the same time.
+- The per-mode settings work that the user originally asked for (and that we got happily distracted from when MediaPipe FaceLandmarker came up) needs to land first. That is the more pressing user-facing item.
+
+When the next session takes this on: read this whole section, look at the **investigate why hand >> face** entry above (it informs which workers benefit most from going pure-GPU), and prototype on one worker before touching all of them.
 
 ## File inventory: what comes from where
 
