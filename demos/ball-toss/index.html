@@ -107,12 +107,19 @@
         0 0 0 14px rgba(79, 195, 247, 0.16);
     }
   }
+  /* Status box: hidden by default, centered in the viewport when shown.
+     Only used during the brief camera-loading window after the user clicks
+     Start Camera. Hidden again as soon as the camera is ready. */
   #status {
-    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-    z-index: 10; font-size: 1.2rem; color: #ccc; font-weight: 500;
-    background: rgba(10,10,26,0.92); padding: 8px 16px; border-radius: 6px;
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 10; font-size: 1.35rem; color: #ccc; font-weight: 500;
+    background: rgba(10,10,26,0.92); padding: 14px 22px; border-radius: 6px;
     border: 1px solid #333;
+    text-align: center; max-width: 480px;
+    display: none;
+    transition: opacity 0.5s ease;
   }
+  #status.fade-out { opacity: 0; pointer-events: none; }
   #controls {
     position: fixed; top: 12px; left: 12px; z-index: 10;
     font-size: 1.04rem; color: #ccc;
@@ -225,7 +232,7 @@
 </div>
 
 
-<div id="status">Click Start to enable camera</div>
+<div id="status"></div>
 <img id="start-logo" src="../../images/WebGPU_Vision_Logo.png" alt="WebGPU Vision">
 <button id="start-btn">Start Camera</button>
 
@@ -887,8 +894,8 @@ function drawSelfView() {
 // Hand Tracking State (per hand)
 // ============================================================
 const handStates = [
-  { pinching: false, wasPinching: false, heldBall: null, openCount: 0 },
-  { pinching: false, wasPinching: false, heldBall: null, openCount: 0 },
+  { pinching: false, wasPinching: false, heldBall: null, openCount: 0, lastSeen: 0 },
+  { pinching: false, wasPinching: false, heldBall: null, openCount: 0, lastSeen: 0 },
 ];
 const pinchThreshold = 0.05;
 // Pinch-release hysteresis: require this many consecutive "open" frames
@@ -1038,6 +1045,7 @@ function handleHandResult(landmarks) {
     // head position is in [-1,1] after a *2 scaling, so hand speed has half
     // the magnitude of head speed for the same physical motion. Multiply by
     // 2 here so the shared interpModeFor thresholds treat both consistently.
+    handStates[h].lastSeen = now;
     const wrist = filtered[0];
     let handSpeed = 0;
     if (handMotion[h].lastPos) {
@@ -1184,7 +1192,14 @@ function handleGestureInput() {
       hs.heldBall = null;
     }
 
-    if (!hand && hs.heldBall) {
+    // Hand-disappeared cleanup. Two triggers:
+    // 1. currentHands[h] is null right now (cleanly went to null this frame).
+    // 2. handStates[h].lastSeen is older than HAND_TIMEOUT (the WebGPU pipeline
+    //    can keep returning the last-seen hand for ROI persistence reasons,
+    //    so currentHands[h] may not actually go null when the user walks out
+    //    of frame. The lastSeen timeout catches that case).
+    const handGone = !hand || (performance.now() - hs.lastSeen > HAND_TIMEOUT);
+    if (handGone && hs.heldBall) {
       scene.remove(hs.heldBall.mesh);
       hs.heldBall.mesh.geometry.dispose();
       hs.heldBall.mat.dispose();
@@ -1204,6 +1219,10 @@ let faceIdle = true, handIdle = true;
 let mpFaceT0 = 0, mpHandT0 = 0; // round-trip start markers for MediaPipe bench
 
 function initMediaPipeBackend(numHands) {
+  // Idempotent: if workers are already alive (e.g. from a page-load preload),
+  // skip re-spawning them. teardownMediaPipe() nulls these so a fresh init
+  // after teardown will go through.
+  if (faceWorker && handWorker) return;
   faceWorker = new Worker('face-worker.js');
   faceWorker.onmessage = (e) => {
     if (e.data.type === 'init') { faceReady = true; updateStatus(); }
@@ -1269,38 +1288,51 @@ let gpuHandTracker = null;
 let gpuFaceTracker = null;
 let gpuReady = false;
 
-async function initWebGPUBackend() {
-  if (!crossOriginIsolated) {
-    const msg = 'WebGPU needs COOP/COEP headers. Start the server with: npm run dev';
-    statusEl.textContent = msg;
-    console.warn(msg);
-    console.warn('crossOriginIsolated:', crossOriginIsolated);
-    console.warn('Current origin:', location.origin);
-    return false;
+// Promise that's set the first time initWebGPUBackend is called. Subsequent
+// calls (e.g. from loadCameraAndModels after a successful preload) await the
+// same promise, so a preload kicked off at page load is reused. The `silent`
+// parameter suppresses status-bar writes so the splash screen's "Click Start"
+// message stays visible during the page-load preload.
+let wgpuInitPromise = null;
+async function initWebGPUBackend(silent = false) {
+  const setStatus = silent
+    ? (msg) => console.log('[wgpu preload]', msg)
+    : (msg) => { statusEl.textContent = msg; };
+  if (wgpuInitPromise) {
+    const ok = await wgpuInitPromise;
+    if (ok) startWebGPUVfcLoop();
+    return ok;
   }
-
-  try {
-    statusEl.textContent = 'Loading WebGPU modules...';
-    const { HandTracker } = await import('../../src/pipeline.js');
-    const { FaceTracker } = await import('../../src/face-pipeline.js');
-
-    gpuHandTracker = new HandTracker();
-    gpuFaceTracker = new FaceTracker(1);
-
-    statusEl.textContent = 'Loading WebGPU hand tracker...';
-    await gpuHandTracker.init((msg) => { statusEl.textContent = msg; });
-
-    statusEl.textContent = 'Loading WebGPU face tracker...';
-    await gpuFaceTracker.init((msg) => { statusEl.textContent = msg; });
-
-    gpuReady = true;
-    startWebGPUVfcLoop();
-    return true;
-  } catch (err) {
-    console.error('WebGPU init error:', err);
-    statusEl.textContent = 'WebGPU init failed: ' + err.message;
-    return false;
-  }
+  wgpuInitPromise = (async () => {
+    if (!crossOriginIsolated) {
+      const msg = 'WebGPU needs COOP/COEP headers. Start the server with: npm run dev';
+      setStatus(msg);
+      console.warn(msg);
+      console.warn('crossOriginIsolated:', crossOriginIsolated);
+      console.warn('Current origin:', location.origin);
+      return false;
+    }
+    try {
+      setStatus('Loading WebGPU modules...');
+      const { HandTracker } = await import('../../src/pipeline.js');
+      const { FaceTracker } = await import('../../src/face-pipeline.js');
+      gpuHandTracker = new HandTracker();
+      gpuFaceTracker = new FaceTracker(1);
+      setStatus('Loading WebGPU hand tracker...');
+      await gpuHandTracker.init(setStatus);
+      setStatus('Loading WebGPU face tracker...');
+      await gpuFaceTracker.init(setStatus);
+      gpuReady = true;
+      return true;
+    } catch (err) {
+      console.error('WebGPU init error:', err);
+      setStatus('WebGPU init failed: ' + err.message);
+      return false;
+    }
+  })();
+  const ok = await wgpuInitPromise;
+  if (ok) startWebGPUVfcLoop();
+  return ok;
 }
 
 // Fire-and-forget: hand and face run independently, never block the render loop
@@ -1341,20 +1373,32 @@ const _bench = {
 // per real video frame via requestVideoFrameCallback. animate() still runs
 // at display refresh for Three.js render + parallax + projectiles, but no
 // longer triggers inference. Start with startWebGPUVfcLoop(), stop with
-// stopWebGPUVfcLoop() (the flag short-circuits the next callback).
+// stopWebGPUVfcLoop(). Safe to call startWebGPUVfcLoop() before the camera
+// is up -- the loop sits idle until the camera arrives, then a follow-up
+// startWebGPUVfcLoop() (e.g. from loadCameraAndModels after camera permit)
+// kicks the rVFC chain.
 let wgpuVfcRunning = false;
+let wgpuVfcChainActive = false; // is an rVFC callback currently queued
 function wgpuVfcTick() {
+  wgpuVfcChainActive = false;
   if (!wgpuVfcRunning) return;
   if (activeBackend === 'webgpu' && gpuReady) {
     processWebGPUHands();
     processWebGPUFace();
   }
-  if (video.srcObject) video.requestVideoFrameCallback(wgpuVfcTick);
+  if (video.srcObject) {
+    wgpuVfcChainActive = true;
+    video.requestVideoFrameCallback(wgpuVfcTick);
+  }
 }
 function startWebGPUVfcLoop() {
-  if (wgpuVfcRunning) return;
   wgpuVfcRunning = true;
-  if (video.srcObject) video.requestVideoFrameCallback(wgpuVfcTick);
+  // Only register a new rVFC if no chain is currently active. Multiple calls
+  // (e.g. from preload then again after camera arrives) are idempotent.
+  if (!wgpuVfcChainActive && video.srcObject) {
+    wgpuVfcChainActive = true;
+    video.requestVideoFrameCallback(wgpuVfcTick);
+  }
 }
 function stopWebGPUVfcLoop() { wgpuVfcRunning = false; }
 
@@ -1876,7 +1920,13 @@ async function startCamera() {
 }
 
 async function loadCameraAndModels() {
+  // Show the centered status box only during the camera-loading window.
+  // It started as display:none in the splash; reveal it now, hide it as
+  // soon as the camera is up.
   statusEl.textContent = 'Starting camera...';
+  statusEl.style.display = 'block';
+  statusEl.classList.remove('fade-out');
+
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 60 }, latencyMode: 'realtime' }
   });
@@ -1890,12 +1940,14 @@ async function loadCameraAndModels() {
     svCanvas.height = Math.round(svW * video.videoHeight / video.videoWidth);
   }
 
-  statusEl.textContent = 'Loading ML models...';
+  // Camera is rolling. Hide the status box now -- model loading happens in
+  // the background and the play instructions are no longer shown.
+  statusEl.classList.add('fade-out');
+  setTimeout(() => { statusEl.style.display = 'none'; }, 600);
 
   if (activeBackend === 'webgpu') {
     const ok = await initWebGPUBackend();
     if (ok) {
-      statusEl.textContent = 'Move your head to shift perspective. Pinch and release to fire.';
       document.getElementById('backend-label').textContent = 'WebGPU';
     } else {
       // WebGPU not available, fall back to MediaPipe and persist the change
@@ -1969,6 +2021,22 @@ function syncInterpAdaptiveAvailability() {
 }
 
 document.getElementById('start-btn').addEventListener('click', startCamera);
+
+// Preload the ML models for the saved/default backend the moment the page
+// loads, while the splash screen is showing. Camera permission is the only
+// thing that requires a user gesture; model downloads and ONNX/MediaPipe
+// initialization do not. By the time the user clicks Start Camera the models
+// are likely already loaded, dramatically improving first-impression latency.
+// initWebGPUBackend / initMediaPipeBackend are idempotent, so loadCameraAndModels
+// will reuse this preloaded state instead of double-loading.
+{
+  const preloadBackend = getSetting('backend');
+  if (preloadBackend === 'webgpu') {
+    initWebGPUBackend(true).catch(err => console.warn('WebGPU preload failed:', err));
+  } else if (preloadBackend === 'mediapipe') {
+    initMediaPipeBackend(parseInt(getSetting('numHands')));
+  }
+}
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startCamera();
 });
