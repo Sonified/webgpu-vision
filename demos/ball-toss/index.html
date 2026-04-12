@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>3D Parallax + Hand Tracking Demo</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👋</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=block">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=block" rel="stylesheet">
 
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -20,12 +24,89 @@
   #hud .val { color: #4fc3f7; font-weight: 600; }
   #hud .pinch { color: #ff6d00; }
   #hud .open { color: #4fc3f7; }
-  #start-btn {
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    z-index: 20; padding: 16px 32px; font-size: 1.55rem; background: #4fc3f7;
-    color: #0a0a1a; border: none; border-radius: 3px; cursor: pointer; font-weight: 700;
+  #start-logo {
+    position: fixed; top: calc(58% + 48px); left: 50%;
+    transform: translate(-50%, calc(-50% - 250px)) scale(1.4);
+    width: 512px; height: 512px;
+    z-index: 19; pointer-events: none;
+    transition: opacity 0.7s ease, transform 0.7s ease;
   }
-  #start-btn:hover { background: #81d4fa; }
+  #start-logo.fade-out {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 310px)) scale(1.4);
+  }
+  /* 8-bit pixel-art button. Hard borders via inset box-shadow (light on top-left,
+     dark on bottom-right = classic raised-pixel look), hard offset drop shadow
+     with no blur, sharp corners, Press Start 2P pixel font. Hover and active
+     states press the button toward its shadow in chunky steps. */
+  #start-btn {
+    position: fixed; top: calc(58% + 96px); left: 50%; transform: translate(-50%, -50%);
+    z-index: 20;
+    width: 240px;          /* fixed so the button doesn't reflow when the */
+    height: 60px;          /* Press Start 2P web font finishes loading async */
+    padding: 0;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.9rem;
+    line-height: 60px;     /* vertical center the single line of text */
+    letter-spacing: 0.05em;
+    background: #4fc3f7;
+    color: #0a0a1a;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+    /* Inset borders form the raised-pixel bevel; the outer offset shadow is
+       the hard pixel drop shadow. Order matters: insets first, then outer. */
+    box-shadow:
+      inset 5px 5px 0 #b3e5fc,
+      inset -5px -5px 0 #0277bd,
+      8px 8px 0 #0a0a1a;
+    text-rendering: geometricPrecision;
+    image-rendering: pixelated;
+    transition: transform 0.06s steps(2), box-shadow 0.06s steps(2), opacity 0.7s ease;
+  }
+  #start-btn:hover {
+    background: #81d4fa;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+  #start-btn:active {
+    transform: translate(-50%, -50%) scale(1.02);
+  }
+  #start-btn.fade-out {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px));
+    pointer-events: none;
+    transition: transform 0.7s ease, opacity 0.7s ease;
+  }
+  /* 8-bit halo: stacked hard pixel rings behind the button via box-shadow.
+     No blur, no gradient -- rings are solid colors with low alpha so they
+     read as a soft halo while keeping the edges pixel-sharp. Animated in
+     visible chunky steps so you can actually see it breathing. */
+  #start-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    z-index: -1;
+    pointer-events: none;
+    animation: start-glow 1s linear infinite;
+  }
+  /* True 0.5s flip via keyframe percentage cuts. 0-49% holds dim, then jumps
+     instantly to bright at 50% and holds. No interpolation, no alternate
+     trickery -- just two discrete states with hard cuts. */
+  @keyframes start-glow {
+    0%, 49% {
+      box-shadow:
+        0 0 0  3px rgba(129, 212, 250, 0.20),
+        0 0 0  8px rgba(79, 195, 247, 0.13),
+        0 0 0 14px rgba(41, 182, 246, 0.07);
+    }
+    50%, 100% {
+      box-shadow:
+        0 0 0  3px rgba(179, 229, 252, 0.40),
+        0 0 0  8px rgba(129, 212, 250, 0.27),
+        0 0 0 14px rgba(79, 195, 247, 0.16);
+    }
+  }
   #status {
     position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
     z-index: 10; font-size: 1.2rem; color: #ccc; font-weight: 500;
@@ -43,13 +124,24 @@
     padding: 2px 6px; font-size: 1.04rem; margin-left: 4px;
   }
   #controls .sep { margin-left: 10px; }
-  #filter-controls {
-    position: fixed; top: 12px; right: 12px; z-index: 10;
+  #filter-controls, #interp-controls {
+    position: fixed; right: 12px; z-index: 10;
     font-size: 0.9rem; color: #ccc;
     background: rgba(10,10,26,0.92); padding: 10px 14px; border-radius: 6px;
     border: 1px solid #333; display: none;
     min-width: 220px;
   }
+  #filter-controls { top: 12px; }
+  /* interp-controls top is set in JS once filter-controls is in the DOM, so it
+     stacks immediately below regardless of how tall filter-controls grows. */
+  #interp-controls .section-label {
+    color: #4fc3f7; font-weight: 600; font-size: 0.95rem;
+    margin-top: 0; margin-bottom: 4px;
+  }
+  #interp-controls .param-row { display: flex; align-items: center; margin-bottom: 3px; }
+  #interp-controls .param-name { width: 90px; color: #888; font-size: 0.85rem; }
+  #interp-controls input[type="range"] { flex: 1; height: 4px; accent-color: #4fc3f7; cursor: pointer; }
+  #interp-controls .param-val { width: 42px; text-align: right; color: #4fc3f7; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
   #filter-controls .section-label {
     color: #4fc3f7; font-weight: 600; font-size: 0.95rem;
     margin-top: 8px; margin-bottom: 4px;
@@ -101,18 +193,41 @@
 <div id="filter-controls">
   <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">Head <button id="recenter-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; font-weight:400;">Recenter</button></div>
   <div class="param-row"><span class="param-name">Model</span><select id="face-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="landmark">Landmark (478pt, precise)</option><option value="detector">Detector (6pt, fast)</option></select></div>
-  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="head-floor" min="1" max="500" step="1" value="10"><span class="param-val" id="head-floor-val">0.10</span></div>
-  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="head-beta" min="0" max="500" step="1" value="35"><span class="param-val" id="head-beta-val">3.5</span></div>
+  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="head-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="head-floor-val">0.100</span></div>
+  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="head-beta" min="0" max="500" step="5" value="35"><span class="param-val" id="head-beta-val">3.5</span></div>
   <div class="section-label">Parallax</div>
   <div class="param-row"><span class="param-name">Amount</span><input type="range" id="parallax-amount" min="0" max="2" step="0.05" value="0.7"><span class="param-val" id="parallax-amount-val">0.70</span></div>
   <div class="param-row"><span class="param-name">Depth</span><input type="range" id="parallax-depth" min="15" max="80" step="1" value="20"><span class="param-val" id="parallax-depth-val">20</span></div>
   <div class="section-label">Hands</div>
-  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="500" step="1" value="10"><span class="param-val" id="hand-floor-val">0.10</span></div>
-  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="1" value="35"><span class="param-val" id="hand-beta-val">3.5</span></div>
+  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="hand-floor-val">0.100</span></div>
+  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="5" value="35"><span class="param-val" id="hand-beta-val">3.5</span></div>
   <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
+<div id="interp-controls">
+  <div class="section-label">Frame Interp</div>
+  <div class="param-row"><span class="param-name">Mode</span><select id="interp-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1x (off)</option><option value="2">2x</option><option value="4">4x</option><option value="adaptive">Adaptive</option></select></div>
+  <div class="param-row"><span class="param-name">Attack</span><input type="range" id="interp-attack" min="5" max="100" step="5" value="50"><span class="param-val" id="interp-attack-val">0.50</span></div>
+  <div class="param-row"><span class="param-name">Decay</span><input type="range" id="interp-decay" min="5" max="100" step="5" value="95"><span class="param-val" id="interp-decay-val">0.95</span></div>
+  <div id="interp-zones" style="display:flex; gap:14px; margin-top:8px; justify-content:center; align-items:flex-end;">
+    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+      <div id="boxes-head" style="display:flex; flex-direction:column-reverse; gap:2px; height:42px;"></div>
+      <span style="color:#666; font-size:0.62rem;">HEAD</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+      <div id="boxes-handL" style="display:flex; flex-direction:column-reverse; gap:2px; height:42px;"></div>
+      <span style="color:#666; font-size:0.62rem;">L</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+      <div id="boxes-handR" style="display:flex; flex-direction:column-reverse; gap:2px; height:42px;"></div>
+      <span style="color:#666; font-size:0.62rem;">R</span>
+    </div>
+  </div>
+</div>
+
+
 <div id="status">Click Start to enable camera</div>
+<img id="start-logo" src="../../images/WebGPU_Vision_Logo.png" alt="WebGPU Vision">
 <button id="start-btn">Start Camera</button>
 
 <div id="hud" style="display:none;">
@@ -148,9 +263,50 @@ import * as THREE from 'three';
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
 // ============================================================
-const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'detector' };
+const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'detector', interpolation: '1' };
 function getSetting(key) { const v = localStorage.getItem(key); return v !== null ? v : DEFAULTS[key]; }
 function setSetting(key, val) { localStorage.setItem(key, val); }
+
+// Per-mode settings profiles. The smoothness + parallax tunables are scoped
+// per (backend, faceMode) combination so each pipeline gets its own dialed-in
+// values. Backend and faceMode themselves are NOT profiled (they define which
+// profile is active). On first read of a field with no profile value, we fall
+// back to the existing flat localStorage key so previously-tuned values get
+// lifted into the active profile without loss; the flat key is shadowed once
+// the slider is touched in that profile.
+const PROFILE_DEFAULTS = {
+  'head-floor': 0.10, 'head-beta': 3.5,
+  'hand-floor': 0.10, 'hand-beta': 3.5,
+  'parallax-amount': 0.7, 'parallax-depth': 20,
+};
+function currentProfileKey() {
+  // activeBackend / faceMode are `let`-declared later in this script and live
+  // in the temporal dead zone until then -- a bare reference throws, even
+  // wrapped in `typeof`. Catch the access so this helper is safe to call from
+  // module init (filter setup runs before activeBackend is declared) and from
+  // the change handlers (where the JS vars are already bound).
+  let b, f;
+  try { b = activeBackend; } catch { /* TDZ */ }
+  try { f = faceMode; } catch { /* TDZ */ }
+  return `profile:${b || getSetting('backend')}:${f || getSetting('faceMode')}`;
+}
+function loadProfile() {
+  const raw = localStorage.getItem(currentProfileKey());
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+function getProfileValue(field) {
+  const p = loadProfile();
+  if (p[field] !== undefined) return p[field];
+  const flat = localStorage.getItem(field);
+  if (flat !== null) return parseFloat(flat);
+  return PROFILE_DEFAULTS[field];
+}
+function setProfileValue(field, value) {
+  const p = loadProfile();
+  p[field] = value;
+  localStorage.setItem(currentProfileKey(), JSON.stringify(p));
+}
 
 // Restore UI from settings
 const backendSelect = document.getElementById('backend-select');
@@ -324,19 +480,48 @@ function landmarkToScene(lm) {
 }
 
 let currentHands = [null, null];
+// Per-hand interpolation state -- parallel to head's. displayedHands lerps
+// toward currentHands at the chosen mode's frame rate. Game logic (pinch
+// detection, projectile spawning) reads currentHands directly so it stays
+// instant; only the rendered wireframe uses displayedHands.
+const displayedHands = [null, null];
+const handInterpFramesLeft = [1, 1];
 
 function updateHandSkeletons() {
   for (let h = 0; h < 2; h++) {
     const sk = handSkeletons[h];
-    const hand = currentHands[h];
-    if (!hand) {
+    const target = currentHands[h];
+    if (!target) {
       for (const m of sk.joints) m.visible = false;
       for (const b of sk.bones) b.line.visible = false;
       continue;
     }
+    // Advance displayedHands[h] one step along the interpolation ramp toward
+    // currentHands[h]. When framesLeft is 1 this is an instant snap. Hand
+    // interpolation only affects the rendered wireframe -- gameplay (pinch
+    // detection, projectile spawning) reads currentHands directly.
+    let displayed = displayedHands[h];
+    if (!displayed) {
+      displayed = target.map(p => ({ x: p.x, y: p.y, z: p.z }));
+      displayedHands[h] = displayed;
+    } else if (handInterpFramesLeft[h] > 1) {
+      const k = 1 / handInterpFramesLeft[h];
+      for (let i = 0; i < JOINT_COUNT; i++) {
+        displayed[i].x += (target[i].x - displayed[i].x) * k;
+        displayed[i].y += (target[i].y - displayed[i].y) * k;
+        displayed[i].z += (target[i].z - displayed[i].z) * k;
+      }
+      handInterpFramesLeft[h]--;
+    } else {
+      for (let i = 0; i < JOINT_COUNT; i++) {
+        displayed[i].x = target[i].x;
+        displayed[i].y = target[i].y;
+        displayed[i].z = target[i].z;
+      }
+    }
     const positions = [];
     for (let i = 0; i < JOINT_COUNT; i++) {
-      const p = landmarkToScene(hand[i]);
+      const p = landmarkToScene(displayed[i]);
       positions.push(p);
       sk.joints[i].position.copy(p);
       sk.joints[i].visible = true;
@@ -408,11 +593,10 @@ class OneEuroFilter {
 // ============================================================
 // Filter params: Floor (minCutoff) + Beta, matching Spellaria's setup.
 // dCutoff hardcoded at 1.0 (derivative smoothing, not user-facing).
-const FILTER_DEFAULTS = {
-  'head-floor': '0.10', 'head-beta': '3.5',
-  'hand-floor': '0.10', 'hand-beta': '3.5',
-};
-function getFilter(key) { const v = localStorage.getItem(key); return parseFloat(v !== null ? v : FILTER_DEFAULTS[key]); }
+// Filter values now live in per-mode profiles via getProfileValue.
+// FILTER_DEFAULTS is kept here only to anchor the slider ranges; the
+// authoritative defaults are in PROFILE_DEFAULTS above.
+function getFilter(key) { return getProfileValue(key); }
 
 const filterParams = {
   head: { floor: getFilter('head-floor'), beta: getFilter('head-beta') },
@@ -441,29 +625,33 @@ function updateFilterParams(group, param, value) {
   }
 }
 
-// Restore slider UI and wire up events
-// Floor: slider 1-100 maps to 0.01-1.00 (value/100)
-// Beta: slider 5-100 maps to 0.5-10.0 (value/10)
+// Slider mapping:
+//   Floor: raw 1-1000 -> display 0.001-1.000  (raw/1000, .toFixed(3))
+//   Beta:  raw 0-500  -> display 0.0-50.0     (raw/10,   .toFixed(1))
+// Floor went from /100 to /1000 to give much finer control at the low end
+// for noisy detector signals -- 0.001-0.099 is now reachable below the
+// previous 0.01 minimum.
+const FLOOR_DIVISOR = 1000;
+const BETA_DIVISOR  = 10;
+const formatFloor = v => v.toFixed(3);
+const formatBeta  = v => v.toFixed(1);
+
 for (const group of ['head', 'hand']) {
   for (const param of ['floor', 'beta']) {
     const slider = document.getElementById(`${group}-${param}`);
-    const valEl = document.getElementById(`${group}-${param}-val`);
-    const saved = filterParams[group][param];
+    const valEl  = document.getElementById(`${group}-${param}-val`);
+    const saved  = filterParams[group][param];
+    const div    = param === 'floor' ? FLOOR_DIVISOR : BETA_DIVISOR;
+    const fmt    = param === 'floor' ? formatFloor   : formatBeta;
 
-    if (param === 'floor') {
-      slider.value = Math.round(saved * 100);
-      valEl.textContent = saved.toFixed(2);
-    } else {
-      slider.value = Math.round(saved * 10);
-      valEl.textContent = saved.toFixed(1);
-    }
+    slider.value = Math.round(saved * div);
+    valEl.textContent = fmt(saved);
 
     slider.addEventListener('input', (e) => {
-      const raw = parseInt(e.target.value);
-      const v = param === 'floor' ? raw / 100 : raw / 10;
+      const v = parseInt(e.target.value) / div;
       filterParams[group][param] = v;
-      valEl.textContent = param === 'floor' ? v.toFixed(2) : v.toFixed(1);
-      setSetting(`${group}-${param}`, v.toString());
+      valEl.textContent = fmt(v);
+      setProfileValue(`${group}-${param}`, v);
       updateFilterParams(group, param, v);
     });
   }
@@ -498,10 +686,77 @@ document.getElementById('copy-settings-btn').addEventListener('click', () => {
 // ============================================================
 // Head Tracking State
 // ============================================================
-const headPos = { x: 0, y: 0, z: 0 };
+const headPos = { x: 0, y: 0, z: 0 };       // updated at detector rate (~30Hz)
+const displayedHeadPos = { x: 0, y: 0, z: 0 }; // updated at display rate via interp
 let refEyeDist = 0;
 const headOffset = { x: 0, y: 0, z: 0 }; // subtracted from raw to recenter
 const headRaw = { x: 0, y: 0, z: 0 };    // last raw values before offset
+
+// Frame interpolation: between detector updates (~30Hz), lerp the displayed
+// position toward the latest detected position in N display frames using a
+// linear ramp (1/N, 1/(N-1), ... 1/1). N=1 = instant snap. N=2 = 50%/100%
+// over 2 display frames. N=4 = 25%/50%/75%/100% over 4. Higher N adds
+// visual smoothness in exchange for rendering lag.
+//
+// "adaptive" mode picks N per-entity per-frame based on smoothed motion speed:
+//   smoothed speed near zero -> 1x (at rest, ready to catch the first move)
+//   smoothed speed small     -> 2x (gentle motion, light smoothing)
+//   smoothed speed large     -> 4x (full motion, maximum smoothing)
+// Speed = |Δposition| between consecutive detector frames in normalized coords.
+// The speed metric is exponentially smoothed (low-pass filtered) so the chosen
+// mode doesn't flicker when raw speed sits right at a threshold. Independent
+// per entity: head and each hand have their own state.
+let interpolationMode = getSetting('interpolation') || '1';
+// Tuned so motion lives in 4x and only drops at the literal edges of motion.
+// 2x is a narrow transition slice between "barely moving" and "in motion."
+// Asymmetric EMA: fast decay (catches deceleration crisply) + slower attack
+// (avoids flickering up to 4x on stray spikes). Both alphas are exposed as
+// sliders in the filter-controls panel so they can be tuned live.
+const SPEED_REST_THRESHOLD = 0.002; // smoothed |Δpos| below this -> 1x (at rest)
+const SPEED_LOW_THRESHOLD  = 0.005; // smoothed |Δpos| below this -> 2x (transition slice)
+// Defaults are 1.0 / 1.0 = no EMA at all (smoothed speed === raw speed each
+// frame). The upstream signal -- spatial averaging + ROI tracking + One Euro
+// position filter -- is already clean enough that adding speed smoothing on
+// top just adds lag. The sliders are still here in case a future noisier
+// signal needs them, but for the current pipeline, full responsiveness wins.
+let interpAttackAlpha = parseFloat(getSetting('interpAttack') || '1.00');
+let interpDecayAlpha  = parseFloat(getSetting('interpDecay')  || '1.00');
+function smoothSpeed(prev, raw) {
+  const alpha = raw < prev ? interpDecayAlpha : interpAttackAlpha;
+  return prev * (1 - alpha) + raw * alpha;
+}
+function interpModeFor(smoothedSpeed) {
+  if (interpolationMode !== 'adaptive') return parseInt(interpolationMode) || 1;
+  if (smoothedSpeed < SPEED_REST_THRESHOLD) return 1;
+  if (smoothedSpeed < SPEED_LOW_THRESHOLD)  return 2;
+  return 4;
+}
+// Per-entity motion state. headMotion tracks the head, handMotion[h] tracks
+// each hand independently. smoothedSpeed is the low-pass-filtered speed used
+// for mode selection.
+function newMotionState() {
+  return { lastPos: null, smoothedSpeed: 0, currentMode: 1 };
+}
+// Render N stacked boxes (color-coded) into a container, growing from the
+// bottom. mode === 0 = nothing tracked. Used by the adaptive interp HUD.
+const INTERP_BOX_COLORS = { 0: '#333', 1: '#ef5350', 2: '#ffca28', 4: '#66bb6a' };
+function renderInterpBoxes(elId, mode) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const color = INTERP_BOX_COLORS[mode] || '#666';
+  let html = '';
+  if (mode === 0) {
+    html = `<div style="width:16px; height:6px; background:#222; border-radius:1px;"></div>`;
+  } else {
+    for (let i = 0; i < mode; i++) {
+      html += `<div style="width:16px; height:6px; background:${color}; border-radius:1px;"></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+const headMotion = newMotionState();
+const handMotion = [newMotionState(), newMotionState()];
+let interpFramesLeft = 1;
 let headCalibrated = false;               // auto-recenter on first detection in relative mode
 let faceKeypoints = null;                 // latest eye keypoints for self-view overlay
 let headLastSeen = 0;
@@ -513,7 +768,7 @@ const HAND_TIMEOUT = 300;
 const PARALLAX_X = 6;
 const PARALLAX_Y = 4;
 const PARALLAX_Z = 3;
-let parallaxAmount = parseFloat((v => v !== null ? v : '0.7')(localStorage.getItem('parallax-amount')));
+let parallaxAmount = getProfileValue('parallax-amount');
 
 // Parallax amount slider
 const parallaxAmountSlider = document.getElementById('parallax-amount');
@@ -523,11 +778,11 @@ parallaxAmountVal.textContent = parallaxAmount.toFixed(2);
 parallaxAmountSlider.addEventListener('input', (e) => {
   parallaxAmount = parseFloat(e.target.value);
   parallaxAmountVal.textContent = parallaxAmount.toFixed(2);
-  setSetting('parallax-amount', parallaxAmount.toString());
+  setProfileValue('parallax-amount', parallaxAmount);
 });
 
 // Parallax depth: how far back the lookAt anchor sits in Z
-let parallaxDepth = parseFloat((v => v !== null ? v : '20')(localStorage.getItem('parallax-depth')));
+let parallaxDepth = getProfileValue('parallax-depth');
 const parallaxDepthSlider = document.getElementById('parallax-depth');
 const parallaxDepthVal = document.getElementById('parallax-depth-val');
 parallaxDepthSlider.value = parallaxDepth;
@@ -535,8 +790,35 @@ parallaxDepthVal.textContent = Math.round(parallaxDepth);
 parallaxDepthSlider.addEventListener('input', (e) => {
   parallaxDepth = parseFloat(e.target.value);
   parallaxDepthVal.textContent = Math.round(parallaxDepth);
-  setSetting('parallax-depth', parallaxDepth.toString());
+  setProfileValue('parallax-depth', parallaxDepth);
 });
+
+// Re-load all profiled values from the currently active profile and push
+// them into the live state (filterParams, the One Euro filters, parallax
+// globals) and into the slider UIs. Called when backend or faceMode
+// changes — the profile key is read fresh inside getProfileValue, so by
+// the time this fires the new active profile is already current.
+function applyProfile() {
+  for (const group of ['head', 'hand']) {
+    for (const param of ['floor', 'beta']) {
+      const v = getProfileValue(`${group}-${param}`);
+      filterParams[group][param] = v;
+      updateFilterParams(group, param, v);
+      const slider = document.getElementById(`${group}-${param}`);
+      const valEl = document.getElementById(`${group}-${param}-val`);
+      const div = param === 'floor' ? FLOOR_DIVISOR : BETA_DIVISOR;
+      const fmt = param === 'floor' ? formatFloor   : formatBeta;
+      slider.value = Math.round(v * div);
+      valEl.textContent = fmt(v);
+    }
+  }
+  parallaxAmount = getProfileValue('parallax-amount');
+  parallaxAmountSlider.value = parallaxAmount;
+  parallaxAmountVal.textContent = parallaxAmount.toFixed(2);
+  parallaxDepth = getProfileValue('parallax-depth');
+  parallaxDepthSlider.value = parallaxDepth;
+  parallaxDepthVal.textContent = Math.round(parallaxDepth);
+}
 
 // ============================================================
 // Self View
@@ -625,20 +907,75 @@ const pinchThreshold = 0.05;
 // ============================================================
 // Shared result handlers (used by both backends)
 // ============================================================
+// Spatial gate for false positives: when a new face detection lands far from
+// where the face just was (within the recovery window), it's almost always
+// BlazeFace finding something face-shaped on a shirt or hand after the real
+// face left the frame. Reject the jump. After FACE_RECOVERY_MS of nothing,
+// drop the gate so any new detection can re-acquire.
+const FACE_JUMP_THRESHOLD = 0.25;   // normalized coords (~25% of frame)
+const FACE_RECOVERY_MS    = 1000;
+let lastFacePos = null;             // { cx, cy, t }
+
+// ROI tracking for the WGPU detector path. After a successful detection we
+// stash the cropped video region in pixel coords; the next frame's detector
+// runs on that crop instead of the full frame, killing source jitter without
+// touching the One Euro filter. FACE_CROP_MARGIN must be loose enough that
+// the face stays at ~25-30% of the model input -- BlazeFace was trained on
+// faces that fraction of the frame, and tighter crops push it outside its
+// training distribution and cause it to detect facial features as new faces.
+// FACE_CROP_MIN_PX is a floor on the crop side so far-away faces don't get
+// a model input that's too small to be useful.
+const FACE_CROP_MARGIN       = 3.5;
+const FACE_CROP_MIN_PX       = 256;
+const FACE_CROP_RECOVERY_MS  = 500;
+let lastFaceCrop = null;            // { sx, sy, sw, sh, t } in video pixels
+
 function handleFaceResult(face) {
   if (!face) return;
+  const now = performance.now();
+  if (face.bbox && lastFacePos && now - lastFacePos.t < FACE_RECOVERY_MS) {
+    const dx = face.bbox.cx - lastFacePos.cx;
+    const dy = face.bbox.cy - lastFacePos.cy;
+    if (Math.hypot(dx, dy) > FACE_JUMP_THRESHOLD) return; // false positive
+  }
+  if (face.bbox) lastFacePos = { cx: face.bbox.cx, cy: face.bbox.cy, t: now };
   const kp = face.keypoints;
   faceKeypoints = kp;
-  const leftEye = kp[0], rightEye = kp[1];
-  const now = performance.now();
   headLastSeen = now;
 
-  headRaw.x = -((leftEye.x + rightEye.x) / 2 - 0.5) * 2;
-  headRaw.y = -((leftEye.y + rightEye.y) / 2 - 0.5) * 2;
-
-  const eyeDist = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y);
-  if (refEyeDist === 0) refEyeDist = eyeDist;
-  headRaw.z = -((eyeDist / refEyeDist) - 1);
+  // Prefer the face bounding box when available -- bbox center is averaged
+  // across the regressor outputs and again by weighted NMS, way more stable
+  // than any pair of keypoints. bbox.w as the depth signal beats eye distance
+  // because it doesn't shrink when you turn your head left/right.
+  // Falls back to eye-based math when bbox isn't present (older paths).
+  if (face.bbox) {
+    // Spatial averaging: blend bbox center with the mean of all 6 keypoints
+    // to soften the model's per-frame quantization. Each keypoint is a
+    // separate regressor head with independent quantization noise, so the
+    // averaged signal has sqrt(7)x lower noise than the bbox center alone --
+    // and the BlazeFace input resolution (128x128) is the source of the
+    // "stair-stepping" you feel on slow movement. Zero latency cost; this
+    // is intra-frame averaging across independent signals, NOT temporal.
+    let cx = face.bbox.cx;
+    let cy = face.bbox.cy;
+    if (kp && kp.length >= 6) {
+      let sx = face.bbox.cx, sy = face.bbox.cy;
+      for (let i = 0; i < 6; i++) { sx += kp[i].x; sy += kp[i].y; }
+      cx = sx / 7;
+      cy = sy / 7;
+    }
+    headRaw.x = -(cx - 0.5) * 2;
+    headRaw.y = -(cy - 0.5) * 2;
+    if (refEyeDist === 0) refEyeDist = face.bbox.w;
+    headRaw.z = -((face.bbox.w / refEyeDist) - 1);
+  } else {
+    const leftEye = kp[0], rightEye = kp[1];
+    headRaw.x = -((leftEye.x + rightEye.x) / 2 - 0.5) * 2;
+    headRaw.y = -((leftEye.y + rightEye.y) / 2 - 0.5) * 2;
+    const eyeDist = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y);
+    if (refEyeDist === 0) refEyeDist = eyeDist;
+    headRaw.z = -((eyeDist / refEyeDist) - 1);
+  }
 
   // In relative mode, auto-calibrate on first detection
   if (!headCalibrated && parallaxMode === 'relative') {
@@ -659,6 +996,21 @@ function handleFaceResult(face) {
   headPos.x = headFilters[0].filter(rawX, now);
   headPos.y = headFilters[1].filter(rawY, now);
   headPos.z = headFilters[2].filter(rawZ, now);
+  // Compute head motion speed (frame-to-frame |Δposition|) and feed it
+  // through an exponential smoother so the chosen interp mode is stable.
+  let headSpeed = 0;
+  if (headMotion.lastPos) {
+    const dx = headPos.x - headMotion.lastPos.x;
+    const dy = headPos.y - headMotion.lastPos.y;
+    headSpeed = Math.hypot(dx, dy);
+  }
+  headMotion.lastPos = { x: headPos.x, y: headPos.y };
+  headMotion.smoothedSpeed = smoothSpeed(headMotion.smoothedSpeed, headSpeed);
+  headMotion.currentMode = interpModeFor(headMotion.smoothedSpeed);
+  // Kick off a new interpolation ramp toward this fresh headPos. The animate
+  // loop will advance displayedHeadPos toward headPos over the chosen mode's
+  // frame count at 1/N, 1/(N-1), ... 1/1, giving a linear ramp.
+  interpFramesLeft = headMotion.currentMode;
 }
 
 function handleHandResult(landmarks) {
@@ -671,7 +1023,11 @@ function handleHandResult(landmarks) {
   for (let h = 0; h < 2; h++) {
     if (!landmarks || h >= landmarks.length) {
       currentHands[h] = null;
+      displayedHands[h] = null;
       handStates[h].pinching = false;
+      handMotion[h].lastPos = null;
+      handMotion[h].smoothedSpeed = 0;
+      handMotion[h].currentMode = 1;
       // Reset filters so they don't stale-lerp when hand reappears
       for (const joint of handFilters[h]) for (const f of joint) f.reset();
       continue;
@@ -684,6 +1040,27 @@ function handleHandResult(landmarks) {
       z: handFilters[h][j][2].filter(lm.z, now),
     }));
     currentHands[h] = filtered;
+    // Hand motion state for adaptive interp: track wrist (landmark 0) as the
+    // hand's representative position. Hand landmarks are in [0,1] coords;
+    // head position is in [-1,1] after a *2 scaling, so hand speed has half
+    // the magnitude of head speed for the same physical motion. Multiply by
+    // 2 here so the shared interpModeFor thresholds treat both consistently.
+    const wrist = filtered[0];
+    let handSpeed = 0;
+    if (handMotion[h].lastPos) {
+      const dx = wrist.x - handMotion[h].lastPos.x;
+      const dy = wrist.y - handMotion[h].lastPos.y;
+      handSpeed = Math.hypot(dx, dy) * 2;
+    }
+    handMotion[h].lastPos = { x: wrist.x, y: wrist.y };
+    handMotion[h].smoothedSpeed = smoothSpeed(handMotion[h].smoothedSpeed, handSpeed);
+    handMotion[h].currentMode = interpModeFor(handMotion[h].smoothedSpeed);
+    handInterpFramesLeft[h] = handMotion[h].currentMode;
+    // First detection of this hand: seed displayedHands so the first render
+    // doesn't lerp from null/zero into the new position.
+    if (!displayedHands[h]) {
+      displayedHands[h] = filtered.map(p => ({ x: p.x, y: p.y, z: p.z }));
+    }
     const dist = Math.hypot(
       filtered[4].x - filtered[8].x,
       filtered[4].y - filtered[8].y,
@@ -700,15 +1077,29 @@ let parallaxMode = getSetting('parallax') || 'relative'; // 'relative', 'raw', o
 let parallaxEnabled = parallaxMode !== 'off';
 
 function applyHeadParallax() {
+  // Advance the displayed head position one step along the interpolation
+  // ramp toward the latest detected headPos. When interpFramesLeft is 1
+  // this is an instant snap (and so is the no-interpolation default).
+  if (interpFramesLeft > 1) {
+    const k = 1 / interpFramesLeft;
+    displayedHeadPos.x += (headPos.x - displayedHeadPos.x) * k;
+    displayedHeadPos.y += (headPos.y - displayedHeadPos.y) * k;
+    displayedHeadPos.z += (headPos.z - displayedHeadPos.z) * k;
+    interpFramesLeft--;
+  } else {
+    displayedHeadPos.x = headPos.x;
+    displayedHeadPos.y = headPos.y;
+    displayedHeadPos.z = headPos.z;
+  }
   if (!parallaxEnabled) {
     camera.position.set(0, 0, 8);
     camera.lookAt(0, 0, -parallaxDepth);
     return;
   }
   camera.position.set(
-    headPos.x * PARALLAX_X * parallaxAmount,
-    headPos.y * PARALLAX_Y * parallaxAmount,
-    8 + headPos.z * PARALLAX_Z * parallaxAmount
+    displayedHeadPos.x * PARALLAX_X * parallaxAmount,
+    displayedHeadPos.y * PARALLAX_Y * parallaxAmount,
+    8 + displayedHeadPos.z * PARALLAX_Z * parallaxAmount
   );
   camera.lookAt(0, 0, -parallaxDepth);
 }
@@ -720,12 +1111,17 @@ function handleGestureInput() {
   for (let h = 0; h < 2; h++) {
     const hs = handStates[h];
     const hand = currentHands[h];
+    // Use the interpolated hand for the ball's position so the held ball glides
+    // with the same smoothness as the rendered wireframe. Pinch state itself
+    // still comes from currentHands (the snap clock) via handStates[h].pinching,
+    // so the moment of release is detected without lag.
+    const drawHand = displayedHands[h] || hand;
 
-    if (hs.pinching && hand) {
+    if (hs.pinching && drawHand) {
       const mid = {
-        x: (hand[4].x + hand[8].x) / 2,
-        y: (hand[4].y + hand[8].y) / 2,
-        z: (hand[4].z + hand[8].z) / 2,
+        x: (drawHand[4].x + drawHand[8].x) / 2,
+        y: (drawHand[4].y + drawHand[8].y) / 2,
+        z: (drawHand[4].z + drawHand[8].z) / 2,
       };
       const pos = landmarkToScene(mid);
 
@@ -759,7 +1155,23 @@ function handleGestureInput() {
     }
 
     if (hs.wasPinching && !hs.pinching && hs.heldBall) {
-      const origin = hs.heldBall.mesh.position.clone();
+      // Snap origin to the RAW current hand position (not the interpolated
+      // displayedHands) so the throw fires from where the user's actual
+      // fingers are, not where the visually-lagged ball was. The brief
+      // visual jump from the smoothed held-ball position to the raw release
+      // position is invisible because the user's attention shifts to the
+      // projectile the instant it leaves the hand.
+      let origin;
+      if (hand) {
+        const rawMid = {
+          x: (hand[4].x + hand[8].x) / 2,
+          y: (hand[4].y + hand[8].y) / 2,
+          z: (hand[4].z + hand[8].z) / 2,
+        };
+        origin = landmarkToScene(rawMid);
+      } else {
+        origin = hs.heldBall.mesh.position.clone();
+      }
       const vx = hs.heldBall.svx * 0.5;
       const vy = hs.heldBall.svy * 0.5;
       scene.remove(hs.heldBall.mesh);
@@ -785,19 +1197,28 @@ function handleGestureInput() {
 let faceWorker = null, handWorker = null;
 let faceReady = false, handReady = false;
 let faceIdle = true, handIdle = true;
+let mpFaceT0 = 0, mpHandT0 = 0; // round-trip start markers for MediaPipe bench
 
 function initMediaPipeBackend(numHands) {
   faceWorker = new Worker('face-worker.js');
   faceWorker.onmessage = (e) => {
     if (e.data.type === 'init') { faceReady = true; updateStatus(); }
-    if (e.data.type === 'result') { handleFaceResult(e.data.face); faceIdle = true; }
+    if (e.data.type === 'result') {
+      if (mpFaceT0) _bench.faceLatencies.push(performance.now() - mpFaceT0);
+      handleFaceResult(e.data.face);
+      faceIdle = true;
+    }
   };
-  faceWorker.postMessage({ type: 'init' });
+  faceWorker.postMessage({ type: 'init', mode: faceMode });
 
   handWorker = new Worker('hand-worker.js');
   handWorker.onmessage = (e) => {
     if (e.data.type === 'init') { handReady = true; updateStatus(); }
-    if (e.data.type === 'result') { handleHandResult(e.data.landmarks); handIdle = true; }
+    if (e.data.type === 'result') {
+      if (mpHandT0) _bench.handLatencies.push(performance.now() - mpHandT0);
+      handleHandResult(e.data.landmarks);
+      handIdle = true;
+    }
   };
   handWorker.postMessage({ type: 'init', numHands });
 }
@@ -812,6 +1233,7 @@ function sendMediaPipeFrames() {
 
   if (faceReady && faceIdle) {
     faceIdle = false;
+    mpFaceT0 = now;
     createImageBitmap(video, { resizeWidth: 320, resizeHeight: 240 }).then(bmp => {
       faceWorker.postMessage({ type: 'detect', image: bmp, timestamp: now }, [bmp]);
     });
@@ -819,11 +1241,13 @@ function sendMediaPipeFrames() {
 
   if (handReady && handIdle) {
     handIdle = false;
+    mpHandT0 = now;
     createImageBitmap(video, { resizeWidth: 320, resizeHeight: 240 }).then(bmp => {
       handWorker.postMessage({ type: 'detect', image: bmp, timestamp: now }, [bmp]);
     });
   }
 
+  _bench.report(now);
   video.requestVideoFrameCallback(sendMediaPipeFrames);
 }
 
@@ -866,6 +1290,7 @@ async function initWebGPUBackend() {
     await gpuFaceTracker.init((msg) => { statusEl.textContent = msg; });
 
     gpuReady = true;
+    startWebGPUVfcLoop();
     return true;
   } catch (err) {
     console.error('WebGPU init error:', err);
@@ -885,27 +1310,87 @@ const _bench = {
   report(now) {
     if (now - this.lastReport < this.interval) return;
     this.lastReport = now;
+    const backendTag = activeBackend === 'webgpu' ? 'WGPU' : 'MP';
     if (this.handLatencies.length > 0) {
       const sorted = [...this.handLatencies].sort((a,b) => a - b);
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
-      console.log(`[BENCH] Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      console.log(`[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
-      console.log(`[BENCH] Face: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      const faceTag = faceMode === 'landmark' ? 'LAN' : 'DET';
+      console.log(`[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     this.handLatencies = [];
     this.faceLatencies = [];
   }
 };
 
+// VFC-driven WebGPU detection loop. Replaces the rAF-driven path that was
+// running inference at display refresh rate (60-120Hz) on a 30fps webcam,
+// causing 2-4x duplicate processing. Now both detectors fire exactly once
+// per real video frame via requestVideoFrameCallback. animate() still runs
+// at display refresh for Three.js render + parallax + projectiles, but no
+// longer triggers inference. Start with startWebGPUVfcLoop(), stop with
+// stopWebGPUVfcLoop() (the flag short-circuits the next callback).
+let wgpuVfcRunning = false;
+function wgpuVfcTick() {
+  if (!wgpuVfcRunning) return;
+  if (activeBackend === 'webgpu' && gpuReady) {
+    processWebGPUHands();
+    processWebGPUFace();
+  }
+  if (video.srcObject) video.requestVideoFrameCallback(wgpuVfcTick);
+}
+function startWebGPUVfcLoop() {
+  if (wgpuVfcRunning) return;
+  wgpuVfcRunning = true;
+  if (video.srcObject) video.requestVideoFrameCallback(wgpuVfcTick);
+}
+function stopWebGPUVfcLoop() { wgpuVfcRunning = false; }
+
+// PHASE 1 INSTRUMENTATION: measure detector-call vs video-frame rates so we
+// can see how many duplicate frames the WGPU path is processing. Counts only,
+// no behavior change. Remove after Phase 2 ships.
+let _p1FaceCalls = 0, _p1HandCalls = 0, _p1VideoFrames = 0, _p1LastReport = 0;
+let _p1RvfcRegistered = false;
+function _p1VideoTick() {
+  _p1VideoFrames++;
+  if (video.srcObject) video.requestVideoFrameCallback(_p1VideoTick);
+}
+function _p1MaybeReport(now) {
+  // Register rVFC the first time srcObject becomes available -- camera load
+  // is async and happens after animate() starts under the early-scene-reveal
+  // path, so we have to keep checking until the stream is up.
+  if (!_p1RvfcRegistered && video.srcObject) {
+    _p1RvfcRegistered = true;
+    _p1LastReport = now;
+    video.requestVideoFrameCallback(_p1VideoTick);
+    return;
+  }
+  if (!_p1RvfcRegistered) return;
+  if (now - _p1LastReport < 1000) return;
+  const dt = (now - _p1LastReport) / 1000;
+  const vfps = _p1VideoFrames / dt;
+  const fps  = _p1FaceCalls / dt;
+  const hps  = _p1HandCalls / dt;
+  const fr   = vfps > 0 ? (fps / vfps).toFixed(2) : '?';
+  const hr   = vfps > 0 ? (hps / vfps).toFixed(2) : '?';
+  console.log(`[FRAME RATE] video: ${vfps.toFixed(1)} fps | face: ${fps.toFixed(1)} calls/s (${fr}x oversampling) | hand: ${hps.toFixed(1)} calls/s (${hr}x oversampling)`);
+  _p1LastReport = now;
+  _p1VideoFrames = 0;
+  _p1FaceCalls = 0;
+  _p1HandCalls = 0;
+}
+
 function processWebGPUHands() {
   if (!gpuReady || gpuHandBusy) return;
+  _p1HandCalls++;
   gpuHandBusy = true;
   const t0 = performance.now();
   gpuHandTracker.processFrame(video).then(result => {
@@ -930,30 +1415,104 @@ faceModeSelect.addEventListener('change', (e) => {
   faceMode = e.target.value;
   setSetting('faceMode', faceMode);
   console.log('[BENCH] Face mode switched to:', faceMode);
+  // MediaPipe worker holds both tasks; tell it which one to run from now on.
+  // WebGPU path reads faceMode directly each frame in processWebGPUFace().
+  if (activeBackend === 'mediapipe' && faceWorker) {
+    faceWorker.postMessage({ type: 'setMode', mode: faceMode });
+  }
+  // WebGPU only: detector and landmark paths use different signals for X/Y/Z
+  // (bbox center + bbox.w vs eye-corner positions + eye-distance). Their
+  // baselines are NOT comparable, so reusing refEyeDist or headOffset across
+  // a mode switch would cause a visible jump in scene depth. Reset both so
+  // the next detection in the new mode re-establishes a fresh baseline.
+  if (activeBackend === 'webgpu') {
+    refEyeDist = 0;
+    headCalibrated = false;
+    lastFaceCrop = null;     // also drop the ROI so the new mode starts full-frame
+    lastFacePos = null;      // and the spatial-jump gate
+  }
+  applyProfile();
 });
 
 function processWebGPUFace() {
   if (!gpuReady || gpuFaceBusy) return;
+  _p1FaceCalls++;
   gpuFaceBusy = true;
   const t0 = performance.now();
 
   if (faceMode === 'detector') {
-    // Detector-only: run BlazeFace every frame, use its 6 keypoints directly
-    createImageBitmap(video).then(bitmap => {
+    // Detector with ROI tracking: after the first successful detection, the
+    // next frame's detector input is cropped around the previous bbox (with
+    // FACE_CROP_MARGIN extra room). This gives the detector a stable input
+    // window frame-to-frame, killing the bbox jitter that comes from running
+    // anchor decode on the entire frame every time. Same architectural pattern
+    // as palm-worker -> landmark-worker. If the detector finds nothing in the
+    // cropped region, the crop is dropped and the next frame goes full-frame.
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) { gpuFaceBusy = false; return; }
+
+    const useCrop = lastFaceCrop && (t0 - lastFaceCrop.t) < FACE_CROP_RECOVERY_MS;
+    const cropSx = useCrop ? lastFaceCrop.sx : 0;
+    const cropSy = useCrop ? lastFaceCrop.sy : 0;
+    const cropSw = useCrop ? lastFaceCrop.sw : vw;
+    const cropSh = useCrop ? lastFaceCrop.sh : vh;
+
+    createImageBitmap(video, cropSx, cropSy, cropSw, cropSh).then(bitmap => {
       gpuFaceTracker.detectWorker.detect(bitmap).then(result => {
         const latency = performance.now() - t0;
         _bench.faceLatencies.push(latency);
+
         if (result.detections && result.detections.length > 0) {
           const det = result.detections[0];
           const lb = result.letterbox;
-          // Undo letterbox on keypoints
-          const kps = det.keypoints.map(kp => ({
+          // Letterbox-undo gives normalized coords WITHIN the cropped region.
+          const kpsCrop = det.keypoints.map(kp => ({
             x: (kp.x - lb.offsetX) / lb.scaleX,
             y: (kp.y - lb.offsetY) / lb.scaleY,
-        }));
-          // keypoints[0] = left eye, keypoints[1] = right eye
-          handleFaceResult({ keypoints: [kps[0], kps[1]] });
+          }));
+          const bboxCrop = {
+            cx: (det.cx - lb.offsetX) / lb.scaleX,
+            cy: (det.cy - lb.offsetY) / lb.scaleY,
+            w:  det.w / lb.scaleX,
+            h:  det.h / lb.scaleY,
+          };
+          // Convert from "normalized within crop" to "normalized within full
+          // video frame" so handleFaceResult and self-view drawing keep using
+          // the same coordinate space they always have.
+          const cnx = cropSx / vw, cny = cropSy / vh;
+          const cnw = cropSw / vw, cnh = cropSh / vh;
+          const kps = kpsCrop.map(kp => ({
+            x: cnx + kp.x * cnw,
+            y: cny + kp.y * cnh,
+          }));
+          const bbox = {
+            cx: cnx + bboxCrop.cx * cnw,
+            cy: cny + bboxCrop.cy * cnh,
+            w:  bboxCrop.w * cnw,
+            h:  bboxCrop.h * cnh,
+          };
+
+          // Compute next-frame crop region from this detection. Square crop
+          // sized to max(bbox dims) * margin, with a minimum side so far-away
+          // faces still get a usable model input. Centered on bbox center,
+          // clamped to the video bounds so we never read outside the frame.
+          const sideRaw = Math.max(bbox.w * vw, bbox.h * vh) * FACE_CROP_MARGIN;
+          const side = Math.max(sideRaw, FACE_CROP_MIN_PX);
+          let nsw = Math.round(Math.min(side, vw));
+          let nsh = Math.round(Math.min(side, vh));
+          let nsx = Math.round(bbox.cx * vw - nsw / 2);
+          let nsy = Math.round(bbox.cy * vh - nsh / 2);
+          nsx = Math.max(0, Math.min(vw - nsw, nsx));
+          nsy = Math.max(0, Math.min(vh - nsh, nsy));
+          lastFaceCrop = { sx: nsx, sy: nsy, sw: nsw, sh: nsh, t: t0 };
+
+          handleFaceResult({ keypoints: kps, bbox });
+        } else if (useCrop) {
+          // Detector found nothing in the cropped region -- the face has
+          // moved out. Drop the crop so the next frame searches full-frame.
+          lastFaceCrop = null;
         }
+
         gpuFaceBusy = false;
       }).catch(err => { console.error('WebGPU face detect error:', err); gpuFaceBusy = false; });
     });
@@ -1004,15 +1563,21 @@ function animate(timestamp) {
   const dt = clock.getDelta();
   const now = performance.now();
 
-  // WebGPU: process frame each loop iteration (self-throttling)
+  // WebGPU inference now runs from a separate requestVideoFrameCallback loop
+  // that fires once per real video frame -- see wgpuVfcTick. animate() is
+  // pure render: Three.js scene, parallax math, projectile physics. Phase 1
+  // instrumentation is still ticked here so the once-a-second report fires
+  // at display refresh and stays in sync with the bench window.
   if (activeBackend === 'webgpu') {
-    processWebGPUHands();
-    processWebGPUFace();
+    _p1MaybeReport(now);
   }
 
   applyHeadParallax();
-  handleGestureInput();
+  // updateHandSkeletons advances the hand interpolation lerp; run it BEFORE
+  // handleGestureInput so the ball-position math uses fresh displayed hand
+  // landmarks instead of the previous frame's.
   updateHandSkeletons();
+  handleGestureInput();
 
   // Rotate cubes + update instanced mesh
   let aliveCount = 0;
@@ -1118,6 +1683,11 @@ function animate(timestamp) {
     const gestures = handStates.filter((hs, i) => currentHands[i]).map(hs => hs.pinching ? 'PINCH' : 'OPEN');
     gestureEl.textContent = gestures.join(' / ') || '--';
     gestureEl.className = 'val ' + (gestures.includes('PINCH') ? 'pinch' : 'open');
+    // Adaptive interp visualizer: stack N boxes per entity (1/2/4) so the
+    // user can watch the chosen mode shift up and down with motion.
+    renderInterpBoxes('boxes-head',  headDetected     ? headMotion.currentMode    : 0);
+    renderInterpBoxes('boxes-handL', currentHands[0]  ? handMotion[0].currentMode : 0);
+    renderInterpBoxes('boxes-handR', currentHands[1]  ? handMotion[1].currentMode : 0);
   }
 
   if (selfViewVisible) drawSelfView();
@@ -1154,8 +1724,8 @@ backendSelect.addEventListener('change', async (e) => {
   setSetting('backend', newBackend);
   e.target.blur();
 
-  // If camera hasn't started yet, just save the setting
-  if (!video.srcObject) { activeBackend = newBackend; return; }
+  // If camera hasn't started yet, just save the setting and refresh sliders
+  if (!video.srcObject) { activeBackend = newBackend; applyProfile(); return; }
 
   // Prevent double-switching
   if (switching) return;
@@ -1178,12 +1748,14 @@ backendSelect.addEventListener('change', async (e) => {
     teardownMediaPipe();
   } else {
     gpuReady = false;
+    stopWebGPUVfcLoop();
     gpuHandTracker = null;
     gpuFaceTracker = null;
   }
 
   // Start new backend
   activeBackend = newBackend;
+  applyProfile();
   if (newBackend === 'webgpu') {
     const ok = await initWebGPUBackend();
     if (!ok) {
@@ -1250,56 +1822,126 @@ parallaxSelect.addEventListener('change', (e) => {
   e.target.blur();
 });
 
+// Reveal the in-game UI (HUD, controls, etc) and start the render loop.
+// Safe to call before the camera or ML models are ready -- the animate()
+// loop just renders the empty 3D scene until tracking comes online.
+function revealSceneUI() {
+  document.getElementById('hud').style.display = 'block';
+  document.getElementById('self-view-btn').style.display = 'block';
+  document.getElementById('controls').style.display = 'block';
+  const filterEl = document.getElementById('filter-controls');
+  const interpEl = document.getElementById('interp-controls');
+  filterEl.style.display = 'block';
+  interpEl.style.display = 'block';
+  // Position interp-controls directly beneath filter-controls. Done after
+  // both are visible so the height measurement is accurate. requestAnimationFrame
+  // ensures the layout has flushed before we read getBoundingClientRect.
+  requestAnimationFrame(() => {
+    const r = filterEl.getBoundingClientRect();
+    interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
+  });
+  initSelfViewBtn();
+  animate();
+}
+
 async function startCamera() {
-  document.getElementById('start-btn').style.display = 'none';
+  const btn = document.getElementById('start-btn');
+  const logo = document.getElementById('start-logo');
+  btn.classList.add('fade-out');
+  if (logo) logo.classList.add('fade-out');
+  // Hide the elements entirely after the fade so they don't intercept clicks
+  // or take layout space. Matches the 0.7s CSS transition.
+  setTimeout(() => {
+    btn.style.display = 'none';
+    if (logo) logo.style.display = 'none';
+  }, 750);
+
+  // Show the 3D scene + start rendering immediately. Camera + ML models
+  // load in the background; until they're ready, processWebGPU* early-return
+  // on !gpuReady so the loop just renders the empty scene.
+  revealSceneUI();
+
+  // Background load chain. Errors surface in the status bar but don't crash
+  // the running render loop.
+  loadCameraAndModels().catch(err => {
+    console.error('Camera/model load error:', err);
+    statusEl.textContent = 'Error: ' + err.message;
+  });
+}
+
+async function loadCameraAndModels() {
   statusEl.textContent = 'Starting camera...';
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 60 }, latencyMode: 'realtime' }
+  });
+  video.srcObject = stream;
+  await video.play();
 
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 60 }, latencyMode: 'realtime' }
-    });
-    video.srcObject = stream;
-    await video.play();
+  // Size self-view canvas to match actual video aspect ratio
+  if (video.videoWidth && video.videoHeight) {
+    const svW = 240;
+    svCanvas.width = svW;
+    svCanvas.height = Math.round(svW * video.videoHeight / video.videoWidth);
+  }
 
-    // Size self-view canvas to match actual video aspect ratio
-    if (video.videoWidth && video.videoHeight) {
-      const svW = 240;
-      svCanvas.width = svW;
-      svCanvas.height = Math.round(svW * video.videoHeight / video.videoWidth);
-    }
+  statusEl.textContent = 'Loading ML models...';
 
-    statusEl.textContent = 'Loading ML models...';
-
-    if (activeBackend === 'webgpu') {
-      const ok = await initWebGPUBackend();
-      if (ok) {
-        statusEl.textContent = 'Move your head to shift perspective. Pinch and release to fire.';
-        document.getElementById('hud').style.display = 'block'; document.getElementById('self-view-btn').style.display = 'block'; initSelfViewBtn();
-        document.getElementById('controls').style.display = 'block';
-        document.getElementById('filter-controls').style.display = 'block';
-        document.getElementById('backend-label').textContent = 'WebGPU';
-      } else {
-        // WebGPU not available, fall back to MediaPipe and persist the change
-        console.warn('WebGPU init failed, falling back to MediaPipe');
-        activeBackend = 'mediapipe';
-        backendSelect.value = 'mediapipe';
-        setSetting('backend', 'mediapipe');
-        initMediaPipeBackend(parseInt(getSetting('numHands')));
-        video.requestVideoFrameCallback(sendMediaPipeFrames);
-        document.getElementById('backend-label').textContent = 'MediaPipe';
-        document.getElementById('hud').style.display = 'block'; document.getElementById('self-view-btn').style.display = 'block'; initSelfViewBtn();
-        document.getElementById('controls').style.display = 'block';
-        document.getElementById('filter-controls').style.display = 'block';
-      }
+  if (activeBackend === 'webgpu') {
+    const ok = await initWebGPUBackend();
+    if (ok) {
+      statusEl.textContent = 'Move your head to shift perspective. Pinch and release to fire.';
+      document.getElementById('backend-label').textContent = 'WebGPU';
     } else {
+      // WebGPU not available, fall back to MediaPipe and persist the change
+      console.warn('WebGPU init failed, falling back to MediaPipe');
+      activeBackend = 'mediapipe';
+      backendSelect.value = 'mediapipe';
+      setSetting('backend', 'mediapipe');
       initMediaPipeBackend(parseInt(getSetting('numHands')));
       video.requestVideoFrameCallback(sendMediaPipeFrames);
+      document.getElementById('backend-label').textContent = 'MediaPipe';
     }
-
-    animate();
-  } catch (err) {
-    statusEl.textContent = 'Camera error: ' + err.message;
+  } else {
+    initMediaPipeBackend(parseInt(getSetting('numHands')));
+    video.requestVideoFrameCallback(sendMediaPipeFrames);
   }
+}
+
+// Frame interpolation controls. Mode dropdown picks 1x/2x/4x or 'adaptive'.
+// Attack/decay sliders tune the asymmetric EMA used by adaptive mode --
+// attack controls how fast the smoothed speed ramps UP into 4x at the start
+// of motion, decay controls how fast it drops back to 1x at the end of motion.
+// IMPORTANT: interpolationMode is stored as a string ('1' / '2' / '4' /
+// 'adaptive') so the 'adaptive' sentinel survives. parseInt would turn it
+// into NaN and silently fall back to 1.
+{
+  const interpSelect = document.getElementById('interp-select');
+  interpSelect.value = String(interpolationMode);
+  interpSelect.addEventListener('change', (e) => {
+    interpolationMode = e.target.value;
+    setSetting('interpolation', interpolationMode);
+    e.target.blur();
+  });
+
+  const attackSlider = document.getElementById('interp-attack');
+  const attackVal    = document.getElementById('interp-attack-val');
+  attackSlider.value = Math.round(interpAttackAlpha * 100);
+  attackVal.textContent = interpAttackAlpha.toFixed(2);
+  attackSlider.addEventListener('input', (e) => {
+    interpAttackAlpha = parseInt(e.target.value) / 100;
+    attackVal.textContent = interpAttackAlpha.toFixed(2);
+    setSetting('interpAttack', String(interpAttackAlpha));
+  });
+
+  const decaySlider = document.getElementById('interp-decay');
+  const decayVal    = document.getElementById('interp-decay-val');
+  decaySlider.value = Math.round(interpDecayAlpha * 100);
+  decayVal.textContent = interpDecayAlpha.toFixed(2);
+  decaySlider.addEventListener('input', (e) => {
+    interpDecayAlpha = parseInt(e.target.value) / 100;
+    decayVal.textContent = interpDecayAlpha.toFixed(2);
+    setSetting('interpDecay', String(interpDecayAlpha));
+  });
 }
 
 document.getElementById('start-btn').addEventListener('click', startCamera);
@@ -1322,6 +1964,9 @@ document.addEventListener('visibilitychange', () => {
     requestAnimationFrame(animate);
     if (activeBackend === 'mediapipe') {
       video.requestVideoFrameCallback(sendMediaPipeFrames);
+    }
+    if (activeBackend === 'webgpu' && wgpuVfcRunning) {
+      video.requestVideoFrameCallback(wgpuVfcTick);
     }
   }
 });
