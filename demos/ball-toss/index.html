@@ -929,7 +929,8 @@ let lastFacePos = null;             // { cx, cy, t }
 const FACE_CROP_MARGIN       = 3.5;
 const FACE_CROP_MIN_PX       = 256;
 const FACE_CROP_RECOVERY_MS  = 500;
-let lastFaceCrop = null;            // { sx, sy, sw, sh, t } in video pixels
+let lastFaceCrop = null;            // { sx, sy, sw, sh, t } in video pixels (may extend outside frame; out-of-bounds = black)
+let faceCropCanvas = null;          // reusable OffscreenCanvas for black-padded crops
 
 function handleFaceResult(face) {
   if (!face) return;
@@ -957,14 +958,26 @@ function handleFaceResult(face) {
     // and the BlazeFace input resolution (128x128) is the source of the
     // "stair-stepping" you feel on slow movement. Zero latency cost; this
     // is intra-frame averaging across independent signals, NOT temporal.
-    let cx = face.bbox.cx;
-    let cy = face.bbox.cy;
-    if (kp && kp.length >= 6) {
-      let sx = face.bbox.cx, sy = face.bbox.cy;
-      for (let i = 0; i < 6; i++) { sx += kp[i].x; sy += kp[i].y; }
-      cx = sx / 7;
-      cy = sy / 7;
+    // Only average points that are actually on-screen. When the face exits an
+    // edge, the off-screen keypoints (and sometimes the bbox center itself)
+    // fall outside [0,1] -- including them would yank the averaged position
+    // toward the edge. Skip any out-of-frame sample; fall back to whatever
+    // signal is still visible. This matches how MediaPipe stops chasing points
+    // that have left the frame.
+    const inFrame = (x, y) => x >= 0 && x <= 1 && y >= 0 && y <= 1;
+    let sx = 0, sy = 0, n = 0;
+    if (inFrame(face.bbox.cx, face.bbox.cy)) {
+      sx += face.bbox.cx; sy += face.bbox.cy; n++;
     }
+    if (kp && kp.length >= 6) {
+      for (let i = 0; i < 6; i++) {
+        if (inFrame(kp[i].x, kp[i].y)) {
+          sx += kp[i].x; sy += kp[i].y; n++;
+        }
+      }
+    }
+    const cx = n > 0 ? sx / n : face.bbox.cx;
+    const cy = n > 0 ? sy / n : face.bbox.cy;
     headRaw.x = -(cx - 0.5) * 2;
     headRaw.y = -(cy - 0.5) * 2;
     if (refEyeDist === 0) refEyeDist = face.bbox.w;
@@ -1505,7 +1518,23 @@ function processWebGPUFace() {
     const cropSw = useCrop ? lastFaceCrop.sw : vw;
     const cropSh = useCrop ? lastFaceCrop.sh : vh;
 
-    createImageBitmap(video, cropSx, cropSy, cropSw, cropSh).then(bitmap => {
+    // Build the crop via an offscreen canvas so the requested region can extend
+    // past the video bounds when the face is near an edge. Out-of-bounds area
+    // stays black (fillRect), and the face stays centered in the crop — BlazeFace
+    // was trained on face-centered inputs, off-center crops degrade detection.
+    if (!faceCropCanvas) faceCropCanvas = new OffscreenCanvas(cropSw, cropSh);
+    if (faceCropCanvas.width !== cropSw || faceCropCanvas.height !== cropSh) {
+      faceCropCanvas.width = cropSw;
+      faceCropCanvas.height = cropSh;
+    }
+    const fctx = faceCropCanvas.getContext('2d');
+    fctx.fillStyle = '#000';
+    fctx.fillRect(0, 0, cropSw, cropSh);
+    // drawImage clips the source rect to the video's real bounds; pixels outside
+    // stay black from the fillRect above.
+    fctx.drawImage(video, cropSx, cropSy, cropSw, cropSh, 0, 0, cropSw, cropSh);
+
+    createImageBitmap(faceCropCanvas).then(bitmap => {
       gpuFaceTracker.detectWorker.detect(bitmap).then(result => {
         const latency = performance.now() - t0;
         _bench.faceLatencies.push(latency);
@@ -1546,12 +1575,13 @@ function processWebGPUFace() {
           // clamped to the video bounds so we never read outside the frame.
           const sideRaw = Math.max(bbox.w * vw, bbox.h * vh) * FACE_CROP_MARGIN;
           const side = Math.max(sideRaw, FACE_CROP_MIN_PX);
-          let nsw = Math.round(Math.min(side, vw));
-          let nsh = Math.round(Math.min(side, vh));
-          let nsx = Math.round(bbox.cx * vw - nsw / 2);
-          let nsy = Math.round(bbox.cy * vh - nsh / 2);
-          nsx = Math.max(0, Math.min(vw - nsw, nsx));
-          nsy = Math.max(0, Math.min(vh - nsh, nsy));
+          // Crop stays centered on the face even when it extends past the frame
+          // edge. Out-of-bounds pixels are painted black by the offscreen canvas
+          // above so BlazeFace always sees a face-centered input.
+          const nsw = Math.round(side);
+          const nsh = Math.round(side);
+          const nsx = Math.round(bbox.cx * vw - nsw / 2);
+          const nsy = Math.round(bbox.cy * vh - nsh / 2);
           lastFaceCrop = { sx: nsx, sy: nsy, sw: nsw, sh: nsh, t: t0 };
 
           handleFaceResult({ keypoints: kps, bbox });
@@ -1876,7 +1906,6 @@ parallaxSelect.addEventListener('change', (e) => {
 // loop just renders the empty 3D scene until tracking comes online.
 function revealSceneUI() {
   document.getElementById('hud').style.display = 'block';
-  document.getElementById('self-view-btn').style.display = 'block';
   document.getElementById('controls').style.display = 'block';
   const filterEl = document.getElementById('filter-controls');
   const interpEl = document.getElementById('interp-controls');
@@ -1890,7 +1919,6 @@ function revealSceneUI() {
     const r = filterEl.getBoundingClientRect();
     interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
   });
-  initSelfViewBtn();
   animate();
 }
 
@@ -1940,25 +1968,38 @@ async function loadCameraAndModels() {
     svCanvas.height = Math.round(svW * video.videoHeight / video.videoWidth);
   }
 
+  // Reveal the self-view button (and the box itself, if the user had it
+  // enabled) now that real video frames exist to draw.
+  document.getElementById('self-view-btn').style.display = 'block';
+  initSelfViewBtn();
+
   // Camera is rolling. Hide the status box now -- model loading happens in
   // the background and the play instructions are no longer shown.
   statusEl.classList.add('fade-out');
   setTimeout(() => { statusEl.style.display = 'none'; }, 600);
 
+  // IMPORTANT: do NOT await ML model init here. The camera is already rolling,
+  // and model loading (WebGPU InferenceSession creation, MediaPipe WASM init,
+  // model downloads) can take a few hundred ms to a couple seconds. Awaiting it
+  // would serialize camera-up with models-ready, which means if the model init
+  // ever stalls, the camera appears to never start. Fire-and-forget instead;
+  // the tracking loops early-return on !gpuReady / !handReady so they just
+  // render the empty scene until models come online.
   if (activeBackend === 'webgpu') {
-    const ok = await initWebGPUBackend();
-    if (ok) {
-      document.getElementById('backend-label').textContent = 'WebGPU';
-    } else {
-      // WebGPU not available, fall back to MediaPipe and persist the change
-      console.warn('WebGPU init failed, falling back to MediaPipe');
-      activeBackend = 'mediapipe';
-      backendSelect.value = 'mediapipe';
-      setSetting('backend', 'mediapipe');
-      initMediaPipeBackend(parseInt(getSetting('numHands')));
-      video.requestVideoFrameCallback(sendMediaPipeFrames);
-      document.getElementById('backend-label').textContent = 'MediaPipe';
-    }
+    initWebGPUBackend().then(ok => {
+      if (ok) {
+        document.getElementById('backend-label').textContent = 'WebGPU';
+      } else {
+        // WebGPU not available, fall back to MediaPipe and persist the change
+        console.warn('WebGPU init failed, falling back to MediaPipe');
+        activeBackend = 'mediapipe';
+        backendSelect.value = 'mediapipe';
+        setSetting('backend', 'mediapipe');
+        initMediaPipeBackend(parseInt(getSetting('numHands')));
+        video.requestVideoFrameCallback(sendMediaPipeFrames);
+        document.getElementById('backend-label').textContent = 'MediaPipe';
+      }
+    }).catch(err => console.error('WebGPU init error:', err));
   } else {
     initMediaPipeBackend(parseInt(getSetting('numHands')));
     video.requestVideoFrameCallback(sendMediaPipeFrames);
