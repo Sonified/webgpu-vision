@@ -201,14 +201,13 @@
   <div class="section-label">Hands</div>
   <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="hand-floor-val">0.100</span></div>
   <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="5" value="35"><span class="param-val" id="hand-beta-val">3.5</span></div>
+  <div class="param-row"><span class="param-name">OpenThresh</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
   <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
 <div id="interp-controls">
   <div class="section-label">Frame Interp</div>
   <div class="param-row"><span class="param-name">Mode</span><select id="interp-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1x (off)</option><option value="2">2x</option><option value="4">4x</option><option value="adaptive">Adaptive</option></select></div>
-  <div class="param-row"><span class="param-name">Attack</span><input type="range" id="interp-attack" min="5" max="100" step="5" value="50"><span class="param-val" id="interp-attack-val">0.50</span></div>
-  <div class="param-row"><span class="param-name">Decay</span><input type="range" id="interp-decay" min="5" max="100" step="5" value="95"><span class="param-val" id="interp-decay-val">0.95</span></div>
   <div id="interp-zones" style="display:flex; gap:14px; margin-top:8px; justify-content:center; align-items:flex-end;">
     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
       <div id="boxes-head" style="display:flex; flex-direction:column-reverse; gap:2px; height:42px;"></div>
@@ -709,33 +708,22 @@ const headRaw = { x: 0, y: 0, z: 0 };    // last raw values before offset
 let interpolationMode = getSetting('interpolation') || '1';
 // Tuned so motion lives in 4x and only drops at the literal edges of motion.
 // 2x is a narrow transition slice between "barely moving" and "in motion."
-// Asymmetric EMA: fast decay (catches deceleration crisply) + slower attack
-// (avoids flickering up to 4x on stray spikes). Both alphas are exposed as
-// sliders in the filter-controls panel so they can be tuned live.
-const SPEED_REST_THRESHOLD = 0.002; // smoothed |Δpos| below this -> 1x (at rest)
-const SPEED_LOW_THRESHOLD  = 0.005; // smoothed |Δpos| below this -> 2x (transition slice)
-// Defaults are 1.0 / 1.0 = no EMA at all (smoothed speed === raw speed each
-// frame). The upstream signal -- spatial averaging + ROI tracking + One Euro
-// position filter -- is already clean enough that adding speed smoothing on
-// top just adds lag. The sliders are still here in case a future noisier
-// signal needs them, but for the current pipeline, full responsiveness wins.
-let interpAttackAlpha = parseFloat(getSetting('interpAttack') || '1.00');
-let interpDecayAlpha  = parseFloat(getSetting('interpDecay')  || '1.00');
-function smoothSpeed(prev, raw) {
-  const alpha = raw < prev ? interpDecayAlpha : interpAttackAlpha;
-  return prev * (1 - alpha) + raw * alpha;
-}
-function interpModeFor(smoothedSpeed) {
+// We tested asymmetric EMA smoothing on the speed metric and found 1.0/1.0
+// was best -- the upstream pipeline (spatial averaging + ROI tracking +
+// One Euro position filter) is clean enough that adding any EMA layer just
+// added lag without stability gains. Speed is fed to interpModeFor raw.
+const SPEED_REST_THRESHOLD = 0.002; // |Δpos| below this -> 1x (at rest)
+const SPEED_LOW_THRESHOLD  = 0.005; // |Δpos| below this -> 2x (transition slice)
+function interpModeFor(speed) {
   if (interpolationMode !== 'adaptive') return parseInt(interpolationMode) || 1;
-  if (smoothedSpeed < SPEED_REST_THRESHOLD) return 1;
-  if (smoothedSpeed < SPEED_LOW_THRESHOLD)  return 2;
+  if (speed < SPEED_REST_THRESHOLD) return 1;
+  if (speed < SPEED_LOW_THRESHOLD)  return 2;
   return 4;
 }
 // Per-entity motion state. headMotion tracks the head, handMotion[h] tracks
-// each hand independently. smoothedSpeed is the low-pass-filtered speed used
-// for mode selection.
+// each hand independently. currentMode is what the box visualizer reads.
 function newMotionState() {
-  return { lastPos: null, smoothedSpeed: 0, currentMode: 1 };
+  return { lastPos: null, currentMode: 1 };
 }
 // Render N stacked boxes (color-coded) into a container, growing from the
 // bottom. mode === 0 = nothing tracked. Used by the adaptive interp HUD.
@@ -899,10 +887,16 @@ function drawSelfView() {
 // Hand Tracking State (per hand)
 // ============================================================
 const handStates = [
-  { pinching: false, wasPinching: false, heldBall: null },
-  { pinching: false, wasPinching: false, heldBall: null },
+  { pinching: false, wasPinching: false, heldBall: null, openCount: 0 },
+  { pinching: false, wasPinching: false, heldBall: null, openCount: 0 },
 ];
 const pinchThreshold = 0.05;
+// Pinch-release hysteresis: require this many consecutive "open" frames
+// (thumb-index distance >= threshold) before flipping pinching false. 1 =
+// instant release (current behavior), higher = more stability against the
+// brief gaps that happen when the model momentarily mis-tracks the fingertip
+// or the pinch wobbles. Persisted to localStorage as 'openThresh'.
+let openThresh = parseInt(getSetting('openThresh') || '1') || 1;
 
 // ============================================================
 // Shared result handlers (used by both backends)
@@ -1005,8 +999,7 @@ function handleFaceResult(face) {
     headSpeed = Math.hypot(dx, dy);
   }
   headMotion.lastPos = { x: headPos.x, y: headPos.y };
-  headMotion.smoothedSpeed = smoothSpeed(headMotion.smoothedSpeed, headSpeed);
-  headMotion.currentMode = interpModeFor(headMotion.smoothedSpeed);
+  headMotion.currentMode = interpModeFor(headSpeed);
   // Kick off a new interpolation ramp toward this fresh headPos. The animate
   // loop will advance displayedHeadPos toward headPos over the chosen mode's
   // frame count at 1/N, 1/(N-1), ... 1/1, giving a linear ramp.
@@ -1025,8 +1018,8 @@ function handleHandResult(landmarks) {
       currentHands[h] = null;
       displayedHands[h] = null;
       handStates[h].pinching = false;
+      handStates[h].openCount = 0;
       handMotion[h].lastPos = null;
-      handMotion[h].smoothedSpeed = 0;
       handMotion[h].currentMode = 1;
       // Reset filters so they don't stale-lerp when hand reappears
       for (const joint of handFilters[h]) for (const f of joint) f.reset();
@@ -1053,8 +1046,7 @@ function handleHandResult(landmarks) {
       handSpeed = Math.hypot(dx, dy) * 2;
     }
     handMotion[h].lastPos = { x: wrist.x, y: wrist.y };
-    handMotion[h].smoothedSpeed = smoothSpeed(handMotion[h].smoothedSpeed, handSpeed);
-    handMotion[h].currentMode = interpModeFor(handMotion[h].smoothedSpeed);
+    handMotion[h].currentMode = interpModeFor(handSpeed);
     handInterpFramesLeft[h] = handMotion[h].currentMode;
     // First detection of this hand: seed displayedHands so the first render
     // doesn't lerp from null/zero into the new position.
@@ -1066,7 +1058,19 @@ function handleHandResult(landmarks) {
       filtered[4].y - filtered[8].y,
       filtered[4].z - filtered[8].z
     );
-    handStates[h].pinching = dist < pinchThreshold;
+    // Pinch hysteresis: snap to true the moment dist drops below threshold,
+    // but only flip to false after openThresh consecutive open frames. This
+    // smooths over brief mis-tracks where the model loses the fingertip for
+    // a frame or two during a sustained pinch.
+    if (dist < pinchThreshold) {
+      handStates[h].pinching = true;
+      handStates[h].openCount = 0;
+    } else {
+      handStates[h].openCount++;
+      if (handStates[h].openCount >= openThresh) {
+        handStates[h].pinching = false;
+      }
+    }
   }
 }
 
@@ -1725,7 +1729,7 @@ backendSelect.addEventListener('change', async (e) => {
   e.target.blur();
 
   // If camera hasn't started yet, just save the setting and refresh sliders
-  if (!video.srcObject) { activeBackend = newBackend; applyProfile(); return; }
+  if (!video.srcObject) { activeBackend = newBackend; applyProfile(); syncInterpAdaptiveAvailability(); return; }
 
   // Prevent double-switching
   if (switching) return;
@@ -1756,6 +1760,7 @@ backendSelect.addEventListener('change', async (e) => {
   // Start new backend
   activeBackend = newBackend;
   applyProfile();
+  syncInterpAdaptiveAvailability();
   if (newBackend === 'webgpu') {
     const ok = await initWebGPUBackend();
     if (!ok) {
@@ -1833,6 +1838,7 @@ function revealSceneUI() {
   const interpEl = document.getElementById('interp-controls');
   filterEl.style.display = 'block';
   interpEl.style.display = 'block';
+  syncInterpAdaptiveAvailability();
   // Position interp-controls directly beneath filter-controls. Done after
   // both are visible so the height measurement is accurate. requestAnimationFrame
   // ensures the layout has flushed before we read getBoundingClientRect.
@@ -1907,13 +1913,22 @@ async function loadCameraAndModels() {
   }
 }
 
-// Frame interpolation controls. Mode dropdown picks 1x/2x/4x or 'adaptive'.
-// Attack/decay sliders tune the asymmetric EMA used by adaptive mode --
-// attack controls how fast the smoothed speed ramps UP into 4x at the start
-// of motion, decay controls how fast it drops back to 1x at the end of motion.
-// IMPORTANT: interpolationMode is stored as a string ('1' / '2' / '4' /
-// 'adaptive') so the 'adaptive' sentinel survives. parseInt would turn it
-// into NaN and silently fall back to 1.
+// OpenThresh dropdown: pinch-release hysteresis. Persisted to localStorage.
+{
+  const openThreshSelect = document.getElementById('open-thresh');
+  openThreshSelect.value = String(openThresh);
+  openThreshSelect.addEventListener('change', (e) => {
+    openThresh = parseInt(e.target.value) || 1;
+    setSetting('openThresh', String(openThresh));
+    e.target.blur();
+  });
+}
+
+// Frame interpolation dropdown: 1x (off), 2x, 4x, or 'adaptive'.
+// Adaptive is greyed out when MediaPipe is the active backend (the per-entity
+// motion-state machinery is only validated on the WebGPU path).
+// IMPORTANT: interpolationMode is stored as a string so the 'adaptive'
+// sentinel survives. parseInt would turn it into NaN and fall back to 1.
 {
   const interpSelect = document.getElementById('interp-select');
   interpSelect.value = String(interpolationMode);
@@ -1922,26 +1937,35 @@ async function loadCameraAndModels() {
     setSetting('interpolation', interpolationMode);
     e.target.blur();
   });
-
-  const attackSlider = document.getElementById('interp-attack');
-  const attackVal    = document.getElementById('interp-attack-val');
-  attackSlider.value = Math.round(interpAttackAlpha * 100);
-  attackVal.textContent = interpAttackAlpha.toFixed(2);
-  attackSlider.addEventListener('input', (e) => {
-    interpAttackAlpha = parseInt(e.target.value) / 100;
-    attackVal.textContent = interpAttackAlpha.toFixed(2);
-    setSetting('interpAttack', String(interpAttackAlpha));
-  });
-
-  const decaySlider = document.getElementById('interp-decay');
-  const decayVal    = document.getElementById('interp-decay-val');
-  decaySlider.value = Math.round(interpDecayAlpha * 100);
-  decayVal.textContent = interpDecayAlpha.toFixed(2);
-  decaySlider.addEventListener('input', (e) => {
-    interpDecayAlpha = parseInt(e.target.value) / 100;
-    decayVal.textContent = interpDecayAlpha.toFixed(2);
-    setSetting('interpDecay', String(interpDecayAlpha));
-  });
+}
+function syncInterpAdaptiveAvailability() {
+  const interpSelect = document.getElementById('interp-select');
+  const interpEl = document.getElementById('interp-controls');
+  if (!interpSelect || !interpEl) return;
+  if (activeBackend === 'mediapipe') {
+    // Hide the entire frame-interp panel on the MediaPipe path. The adaptive
+    // motion-state machinery is only validated against the WebGPU pipeline,
+    // and MP runs through its own internal smoothing, so the interp ramp
+    // would just add visible lag with no benefit. The user's saved interp
+    // mode is preserved in localStorage so switching back to WGPU restores
+    // it -- we override the in-memory variable here without persisting.
+    interpolationMode = '1';
+    interpEl.style.display = 'none';
+  } else {
+    interpolationMode = getSetting('interpolation') || '1';
+    interpSelect.value = String(interpolationMode);
+    interpEl.style.display = 'block';
+    // Re-run the bottom-of-filter-controls positioning since the panel was
+    // hidden and may not have a top set yet, or filter-controls may have
+    // changed height in the interim.
+    requestAnimationFrame(() => {
+      const filterEl = document.getElementById('filter-controls');
+      if (filterEl) {
+        const r = filterEl.getBoundingClientRect();
+        interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
+      }
+    });
+  }
 }
 
 document.getElementById('start-btn').addEventListener('click', startCamera);
