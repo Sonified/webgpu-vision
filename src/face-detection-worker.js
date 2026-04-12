@@ -269,15 +269,13 @@ self.onmessage = async (e) => {
           await initGPU(onnxDevice);
           useGPUDirect = true;
           useGPU = true;
-          console.log('Face worker: GPU direct path enabled (zero CPU readback, shared device)');
         } catch (gpuErr) {
-          console.warn('Face worker: GPU direct unavailable, trying standalone GPU:', gpuErr.message);
+          console.warn('[face-worker] GPU direct unavailable, trying standalone GPU:', gpuErr.message);
           try {
             await initGPU();
             useGPU = true;
-            console.log('Face worker: WebGPU letterbox enabled (standalone device, with readback)');
           } catch (err2) {
-            console.warn('Face worker: GPU letterbox unavailable:', err2.message);
+            console.warn('[face-worker] GPU letterbox unavailable:', err2.message);
           }
         }
       }
@@ -286,6 +284,7 @@ self.onmessage = async (e) => {
       const warmup = new ort.Tensor('float32', new Float32Array(FACE_SIZE * FACE_SIZE * 3), [1, FACE_SIZE, FACE_SIZE, 3]);
       await session.run({ [session.inputNames[0]]: warmup });
 
+      console.log(`[face-worker] ready (GPU direct: ${useGPUDirect})`);
       self.postMessage({ type: 'ready', gpuLetterbox: useGPU, gpuDirect: useGPUDirect });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });

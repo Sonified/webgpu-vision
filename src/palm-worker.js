@@ -252,42 +252,32 @@ self.onmessage = async (e) => {
 
   if (type === 'init') {
     try {
-      console.log('[palm-worker] init started, modelUrl:', e.data.modelUrl);
-
       // Generate anchors
       anchors = generateAnchors();
-      console.log('[palm-worker] anchors generated:', anchors.length);
 
       // Diagnostic fetch -- surface 404s / CORS issues clearly before ORT swallows them
-      console.log('[palm-worker] fetching model...');
       const modelResp = await fetch(e.data.modelUrl);
-      console.log('[palm-worker] model fetch status:', modelResp.status, modelResp.ok);
       if (!modelResp.ok) throw new Error(`Model fetch failed: ${modelResp.status} ${e.data.modelUrl}`);
 
       // Create ONNX session FIRST -- it creates its own WebGPU device that we can share
-      console.log('[palm-worker] creating InferenceSession with webgpu EP...');
       session = await ort.InferenceSession.create(e.data.modelUrl, {
         executionProviders: ['webgpu'],
         graphOptimizationLevel: 'all',
         enableMemPattern: true,
       });
-      console.log('[palm-worker] session created, inputs:', session.inputNames, 'outputs:', session.outputNames);
 
       // Now grab ONNX RT's device and build our compute shader on it (zero-copy path)
       if (typeof navigator !== 'undefined' && navigator.gpu) {
-        console.log('[palm-worker] navigator.gpu available, attempting shared-device GPU direct path...');
         try {
           const onnxDevice = await ort.env.webgpu.device;
           await initGPU(onnxDevice);
           useGPUDirect = true;
           useGPU = true;
-          console.log('[palm-worker] GPU direct path enabled (zero CPU readback, shared device)');
         } catch (gpuErr) {
           console.warn('[palm-worker] GPU direct unavailable, trying standalone GPU:', gpuErr.message);
           try {
             await initGPU();
             useGPU = true;
-            console.log('[palm-worker] WebGPU letterbox enabled (standalone device, with readback)');
           } catch (err2) {
             console.warn('[palm-worker] GPU letterbox unavailable:', err2.message);
           }
@@ -297,10 +287,10 @@ self.onmessage = async (e) => {
       }
 
       // Warmup
-      console.log('[palm-worker] running warmup...');
       const warmup = new ort.Tensor('float32', new Float32Array(PALM_SIZE * PALM_SIZE * 3), [1, PALM_SIZE, PALM_SIZE, 3]);
       await session.run({ [session.inputNames[0]]: warmup });
-      console.log('[palm-worker] warmup done');
+
+      console.log(`[palm-worker] ready (GPU direct: ${useGPUDirect})`);
 
       self.postMessage({ type: 'ready', gpuLetterbox: useGPU, gpuDirect: useGPUDirect });
     } catch (err) {

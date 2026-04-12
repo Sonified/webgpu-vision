@@ -38,7 +38,6 @@ class FaceDetectionWorker {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
-          console.log('Face detection worker ready, GPU letterbox:', e.data.gpuLetterbox);
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {
@@ -88,7 +87,6 @@ class FaceLandmarkWorker {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
-          console.log('Face landmark worker ready, GPU warp:', e.data.gpuWarp);
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {
@@ -160,7 +158,6 @@ class BlendshapeWorker {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
-          console.log('Blendshape worker ready');
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {

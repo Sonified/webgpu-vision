@@ -39,7 +39,6 @@ class PalmWorker {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
-          console.log('[PalmWorker] ready, GPU letterbox:', e.data.gpuLetterbox);
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {
@@ -51,7 +50,6 @@ class PalmWorker {
         console.error('[PalmWorker] worker crashed:', e.message, e);
         reject(new Error(`Worker crashed: ${e.message}`));
       };
-      console.log('[PalmWorker] posting init, modelUrl:', modelUrl);
       this.worker.postMessage({ type: 'init', modelUrl });
     });
   }
@@ -95,7 +93,6 @@ class LandmarkWorker {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
-          console.log('Landmark worker ready, GPU warp:', e.data.gpuWarp);
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {

@@ -211,7 +211,6 @@ self.onmessage = async (e) => {
           const onnxDevice = await ort.env.webgpu.device;
           await initGPU(onnxDevice);
           useGPUDirect = true;
-          console.log('Worker: GPU direct path enabled (zero CPU readback, shared device)');
         } catch (gpuErr) {
           console.warn('Worker: GPU direct unavailable, using canvas fallback:', gpuErr.message);
         }
@@ -230,6 +229,7 @@ self.onmessage = async (e) => {
         else if (size === 1) outputMap.handedness = name;
       }
 
+      console.log(`[landmark-worker] ready (GPU direct: ${useGPUDirect})`);
       self.postMessage({ type: 'ready', gpuDirect: useGPUDirect });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });

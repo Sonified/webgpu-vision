@@ -39,7 +39,7 @@ self.onmessage = async (e) => {
       const warmup = new ort.Tensor('float32', new Float32Array(146 * 2), [1, 146, 2]);
       await session.run({ [session.inputNames[0]]: warmup });
 
-      console.log('Blendshape worker ready');
+      console.log('[blendshape-worker] ready');
       self.postMessage({ type: 'ready' });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });

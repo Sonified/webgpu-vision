@@ -199,16 +199,17 @@
 
 <div id="filter-controls">
   <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">Head <button id="recenter-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; font-weight:400;">Recenter</button></div>
-  <div class="param-row"><span class="param-name">Model</span><select id="face-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="landmark">Landmark (478pt, precise)</option><option value="detector">Detector (6pt, fast)</option></select></div>
-  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="head-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="head-floor-val">0.100</span></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">Model</span><select id="face-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="landmark">Landmark (478pt, precise)</option><option value="detector">Detector (6pt, fast)</option></select></div>
+  <div class="param-row" style="margin-top:4px;"><span class="param-name">ROI</span><select id="face-roi" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="auto">Auto (center only)</option><option value="off">Off (full frame)</option><option value="on">On (always crop)</option></select></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">Floor</span><input type="range" id="head-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="head-floor-val">0.100</span></div>
   <div class="param-row"><span class="param-name">Beta</span><input type="range" id="head-beta" min="0" max="500" step="5" value="35"><span class="param-val" id="head-beta-val">3.5</span></div>
-  <div class="section-label">Parallax</div>
+  <div class="section-label" style="margin-top:6px;">Parallax</div>
   <div class="param-row"><span class="param-name">Amount</span><input type="range" id="parallax-amount" min="0" max="2" step="0.05" value="0.7"><span class="param-val" id="parallax-amount-val">0.70</span></div>
   <div class="param-row"><span class="param-name">Depth</span><input type="range" id="parallax-depth" min="15" max="80" step="1" value="20"><span class="param-val" id="parallax-depth-val">20</span></div>
   <div class="section-label">Hands</div>
   <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="hand-floor-val">0.100</span></div>
   <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="5" value="35"><span class="param-val" id="hand-beta-val">3.5</span></div>
-  <div class="param-row"><span class="param-name">OpenThresh</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">OpenThresh</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
   <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
@@ -242,8 +243,15 @@
   <div><span class="label">Gesture: </span><span id="gesture-state" class="val">--</span></div>
   <div><span class="label">FPS: </span><span id="fps" class="val">--</span></div>
   <div><span class="label">Backend: </span><span id="backend-label" class="val">--</span></div>
+  <div><span class="label">ROI: </span><span id="roi-state" class="val">--</span></div>
 </div>
 
+<!-- DEBUG: live view of the exact input BlazeFace sees in crop mode. Positioned
+     to the left of the Self View button. Remove once ROI cropping is diagnosed. -->
+<div id="crop-debug" style="position:fixed; bottom:16px; right:290px; z-index:11; border:1px solid #f60; border-radius:4px; overflow:hidden; background:#000; display:none;">
+  <canvas id="crop-debug-canvas" width="160" height="160" style="display:block; width:160px; height:160px;"></canvas>
+  <div style="position:absolute; top:2px; left:4px; color:#f60; font-size:0.6rem; font-family:monospace;">CROP INPUT</div>
+</div>
 <button id="self-view-btn" style="position:fixed; bottom:16px; right:16px; z-index:11; background:#222; color:#888; border:1px solid #444; border-radius:4px; padding:6px 14px; font-size:0.85rem; cursor:pointer; display:none;">Self View</button>
 
 <div id="winner" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; font-size:4rem; font-weight:700; color:#fff; font-family:system-ui,sans-serif;">You Win!</div>
@@ -269,7 +277,7 @@ import * as THREE from 'three';
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
 // ============================================================
-const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'detector', interpolation: '1' };
+const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'landmark', faceRoi: 'auto', interpolation: '1' };
 function getSetting(key) { const v = localStorage.getItem(key); return v !== null ? v : DEFAULTS[key]; }
 function setSetting(key, val) { localStorage.setItem(key, val); }
 
@@ -478,10 +486,17 @@ for (let h = 0; h < 2; h++) {
 }
 
 function landmarkToScene(lm) {
+  const handZ = camera.position.z - (6 + headPos.z * -4) + lm.z * -3;
+  // In head-coupled parallax, Z=0 is the "screen plane" — objects there stay
+  // fixed on screen when the camera moves. Objects at other depths shift.
+  // The hand is at handZ (between camera and screen plane), so it needs a
+  // fraction of the camera offset: handZ / camera.z. Full offset (1.0) would
+  // glue the hand to the camera; zero would glue it to the screen plane.
+  const pFrac = camera.position.z !== 0 ? handZ / camera.position.z : 0;
   return new THREE.Vector3(
-    -(lm.x - 0.5) * 12 + camera.position.x,
-    -(lm.y - 0.5) * 9 + camera.position.y,
-    camera.position.z - (6 + headPos.z * -4) + lm.z * -3
+    -(lm.x - 0.5) * 12 + camera.position.x * pFrac,
+    -(lm.y - 0.5) * 9 + camera.position.y * pFrac,
+    handZ
   );
 }
 
@@ -929,8 +944,12 @@ let lastFacePos = null;             // { cx, cy, t }
 const FACE_CROP_MARGIN       = 3.5;
 const FACE_CROP_MIN_PX       = 256;
 const FACE_CROP_RECOVERY_MS  = 500;
+const FACE_CROP_EMA          = 0.15; // smoothing factor for crop center (0=frozen, 1=raw)
 let lastFaceCrop = null;            // { sx, sy, sw, sh, t } in video pixels (may extend outside frame; out-of-bounds = black)
+let smoothCropCx = null;            // EMA-smoothed crop center in normalized coords (0..1)
+let smoothCropCy = null;
 let faceCropCanvas = null;          // reusable OffscreenCanvas for black-padded crops
+let faceRoiState = false;           // sticky: is auto-mode currently in crop state? Hysteresis below.
 
 function handleFaceResult(face) {
   if (!face) return;
@@ -1308,8 +1327,9 @@ let gpuReady = false;
 // message stays visible during the page-load preload.
 let wgpuInitPromise = null;
 async function initWebGPUBackend(silent = false) {
+  let preloadLogged = false;
   const setStatus = silent
-    ? (msg) => console.log('[wgpu preload]', msg)
+    ? (msg) => { if (!preloadLogged) { console.log('[preload] loading...'); preloadLogged = true; } }
     : (msg) => { statusEl.textContent = msg; };
   if (wgpuInitPromise) {
     const ok = await wgpuInitPromise;
@@ -1336,6 +1356,7 @@ async function initWebGPUBackend(silent = false) {
       setStatus('Loading WebGPU face tracker...');
       await gpuFaceTracker.init(setStatus);
       gpuReady = true;
+      if (silent) console.log('[preload] ready');
       return true;
     } catch (err) {
       console.error('WebGPU init error:', err);
@@ -1393,6 +1414,7 @@ const _bench = {
 let wgpuVfcRunning = false;
 let wgpuVfcChainActive = false; // is an rVFC callback currently queued
 function wgpuVfcTick() {
+  if (!wgpuVfcTick._logged) { wgpuVfcTick._logged = true; console.log('[lifecycle] wgpuVfcTick first fire'); }
   wgpuVfcChainActive = false;
   if (!wgpuVfcRunning) return;
   if (activeBackend === 'webgpu' && gpuReady) {
@@ -1410,6 +1432,7 @@ function startWebGPUVfcLoop() {
   // (e.g. from preload then again after camera arrives) are idempotent.
   if (!wgpuVfcChainActive && video.srcObject) {
     wgpuVfcChainActive = true;
+    console.log('[lifecycle] wgpu rVFC chain started');
     video.requestVideoFrameCallback(wgpuVfcTick);
   }
 }
@@ -1489,10 +1512,24 @@ faceModeSelect.addEventListener('change', (e) => {
   if (activeBackend === 'webgpu') {
     refEyeDist = 0;
     headCalibrated = false;
-    lastFaceCrop = null;     // also drop the ROI so the new mode starts full-frame
+    lastFaceCrop = null; smoothCropCx = smoothCropCy = null; // drop ROI so new mode starts full-frame
     lastFacePos = null;      // and the spatial-jump gate
   }
   applyProfile();
+});
+
+// Face ROI tracking toggle. 'off' = run BlazeFace on the full frame every call
+// (matches MediaPipe FaceDetector, robust at frame edges). 'on' = crop around
+// the last bbox with FACE_CROP_MARGIN to reduce center-of-frame jitter at the
+// cost of edge robustness. Persisted per-session via DEFAULTS.faceRoi.
+let faceRoi = getSetting('faceRoi');
+const faceRoiSelect = document.getElementById('face-roi');
+faceRoiSelect.value = faceRoi;
+faceRoiSelect.addEventListener('change', (e) => {
+  faceRoi = e.target.value;
+  setSetting('faceRoi', faceRoi);
+  lastFaceCrop = null; smoothCropCx = smoothCropCy = null; // drop stale ROI
+  e.target.blur();
 });
 
 function processWebGPUFace() {
@@ -1512,7 +1549,52 @@ function processWebGPUFace() {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) { gpuFaceBusy = false; return; }
 
-    const useCrop = lastFaceCrop && (t0 - lastFaceCrop.t) < FACE_CROP_RECOVERY_MS;
+    // ROI tracking toggle (faceRoi dropdown):
+    //   'off'  = always full-frame (matches MediaPipe FaceDetector, robust at edges)
+    //   'on'   = always crop around last bbox (best center jitter, breaks at edges)
+    //   'auto' = crop when the last face was in the inner 90% of the frame,
+    //            full-frame when it drifted into the outer 10%. Gets center
+    //            smoothness AND edge robustness. This is the default.
+    // The "was the face in the center" check reads lastFacePos (set in
+    // handleFaceResult on every successful detection), NOT the crop rectangle.
+    let useCrop = false;
+    const roiFresh = lastFaceCrop && (t0 - lastFaceCrop.t) < FACE_CROP_RECOVERY_MS;
+    const prevRoiState = faceRoiState;
+    let decisionReason = 'no-fresh-roi';
+    if (roiFresh) {
+      if (faceRoi === 'on') {
+        useCrop = true;
+        decisionReason = 'force-on';
+      } else if (faceRoi === 'auto' && lastFacePos) {
+        const cx = lastFacePos.cx, cy = lastFacePos.cy;
+        if (faceRoiState) {
+          const outside = cx < 0.03 || cx > 0.97 || cy < 0.03 || cy > 0.97;
+          if (outside) faceRoiState = false;
+          decisionReason = outside ? 'crop→full (outside)' : 'crop (still inside exit zone)';
+        } else {
+          const wellInside = cx > 0.10 && cx < 0.90 && cy > 0.10 && cy < 0.90;
+          if (wellInside) faceRoiState = true;
+          decisionReason = wellInside ? 'full→crop (well inside)' : 'full (in dead zone)';
+        }
+        useCrop = faceRoiState;
+      }
+    } else {
+      faceRoiState = false;
+    }
+    // DEBUG: only log on state changes to avoid console spam.
+    if (faceRoi === 'auto' && prevRoiState !== faceRoiState) {
+      const lp = lastFacePos ? `pos=(${lastFacePos.cx.toFixed(3)},${lastFacePos.cy.toFixed(3)})` : 'pos=null';
+      console.log(`[roi] ${lp} ${prevRoiState ? 'crop' : 'full'}→${faceRoiState ? 'crop' : 'full'} reason="${decisionReason}"`);
+    }
+    // HUD status: show the mode + whether cropping is active this frame.
+    // 'off' / 'on' show the mode verbatim; 'auto' shows CROP or FULL depending
+    // on whether the face is currently in the inner 90% or the outer 10%.
+    const roiEl = document.getElementById('roi-state');
+    if (roiEl) {
+      if (faceRoi === 'off') roiEl.textContent = 'off';
+      else if (faceRoi === 'on') roiEl.textContent = useCrop ? 'on (crop)' : 'on (full)';
+      else roiEl.textContent = useCrop ? 'auto (crop)' : 'auto (full)';
+    }
     const cropSx = useCrop ? lastFaceCrop.sx : 0;
     const cropSy = useCrop ? lastFaceCrop.sy : 0;
     const cropSw = useCrop ? lastFaceCrop.sw : vw;
@@ -1530,9 +1612,34 @@ function processWebGPUFace() {
     const fctx = faceCropCanvas.getContext('2d');
     fctx.fillStyle = '#000';
     fctx.fillRect(0, 0, cropSw, cropSh);
-    // drawImage clips the source rect to the video's real bounds; pixels outside
-    // stay black from the fillRect above.
-    fctx.drawImage(video, cropSx, cropSy, cropSw, cropSh, 0, 0, cropSw, cropSh);
+    // Manually clip the source rect to the video bounds and draw into the
+    // correct destination offset. Canvas drawImage with an out-of-bounds source
+    // rect does proportional dest clipping per spec, which SQUASHES the visible
+    // region instead of placing it at the right offset within the black canvas.
+    const clSx = Math.max(0, cropSx), clSy = Math.max(0, cropSy);
+    const clEx = Math.min(vw, cropSx + cropSw), clEy = Math.min(vh, cropSy + cropSh);
+    if (clEx > clSx && clEy > clSy) {
+      fctx.drawImage(video,
+        clSx, clSy, clEx - clSx, clEy - clSy,           // source: clipped to video bounds
+        clSx - cropSx, clSy - cropSy, clEx - clSx, clEy - clSy  // dest: offset into canvas
+      );
+    }
+
+    // DEBUG: mirror the exact input we're about to hand BlazeFace into the
+    // lower-right debug panel. Shows up as soon as the first crop is built.
+    {
+      const dbg = document.getElementById('crop-debug');
+      const dbgCanvas = document.getElementById('crop-debug-canvas');
+      if (dbg && dbgCanvas) {
+        dbg.style.display = useCrop ? 'block' : 'block';
+        const dctx = dbgCanvas.getContext('2d');
+        dctx.fillStyle = '#000';
+        dctx.fillRect(0, 0, 160, 160);
+        dctx.drawImage(faceCropCanvas, 0, 0, 160, 160);
+        // Red outline at the inferred face center (in crop-local space) so we
+        // can see whether BlazeFace is looking where we think it is.
+      }
+    }
 
     createImageBitmap(faceCropCanvas).then(bitmap => {
       gpuFaceTracker.detectWorker.detect(bitmap).then(result => {
@@ -1575,20 +1682,28 @@ function processWebGPUFace() {
           // clamped to the video bounds so we never read outside the frame.
           const sideRaw = Math.max(bbox.w * vw, bbox.h * vh) * FACE_CROP_MARGIN;
           const side = Math.max(sideRaw, FACE_CROP_MIN_PX);
-          // Crop stays centered on the face even when it extends past the frame
-          // edge. Out-of-bounds pixels are painted black by the offscreen canvas
-          // above so BlazeFace always sees a face-centered input.
+          // EMA-smooth the crop center so the crop doesn't chase per-frame
+          // detector noise. Without this, BlazeFace's ±0.04 quantization jitter
+          // feeds back through the crop position and gets amplified every frame.
+          if (smoothCropCx === null) {
+            smoothCropCx = bbox.cx;
+            smoothCropCy = bbox.cy;
+          } else {
+            smoothCropCx += FACE_CROP_EMA * (bbox.cx - smoothCropCx);
+            smoothCropCy += FACE_CROP_EMA * (bbox.cy - smoothCropCy);
+          }
           const nsw = Math.round(side);
           const nsh = Math.round(side);
-          const nsx = Math.round(bbox.cx * vw - nsw / 2);
-          const nsy = Math.round(bbox.cy * vh - nsh / 2);
+          const nsx = Math.round(smoothCropCx * vw - nsw / 2);
+          const nsy = Math.round(smoothCropCy * vh - nsh / 2);
           lastFaceCrop = { sx: nsx, sy: nsy, sw: nsw, sh: nsh, t: t0 };
+
 
           handleFaceResult({ keypoints: kps, bbox });
         } else if (useCrop) {
           // Detector found nothing in the cropped region -- the face has
           // moved out. Drop the crop so the next frame searches full-frame.
-          lastFaceCrop = null;
+          lastFaceCrop = null; smoothCropCx = smoothCropCy = null;
         }
 
         gpuFaceBusy = false;
@@ -1630,14 +1745,19 @@ let lastAnimateTimestamp = -1;
 
 
 function animate(timestamp) {
+  if (!animate._n) animate._n = 0;
+  animate._n++;
+  if (animate._n === 1) console.log('[lifecycle] animate() first call');
+  if (animate._n === 3) console.log('[lifecycle] animate() rAF chain alive (frame 3)');
   // Dedupe parallel animate chains: when the tab is hidden then re-shown,
   // the throttled-old rAF and the visibilitychange-spawned new rAF can both
   // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
   // the second one returns here and the chain merges back into one.
   if (timestamp === lastAnimateTimestamp) return;
   lastAnimateTimestamp = timestamp;
-  if (document.hidden) return;
+  if (document.hidden) { console.warn('[lifecycle] animate() bailed: document.hidden'); return; }
   requestAnimationFrame(animate);
+  try {
   const dt = clock.getDelta();
   const now = performance.now();
 
@@ -1771,6 +1891,9 @@ function animate(timestamp) {
   if (selfViewVisible) drawSelfView();
 
   renderer.render(scene, camera);
+  } catch (err) {
+    console.error('[lifecycle] animate() THREW:', err);
+  }
 }
 
 // ============================================================
@@ -1923,6 +2046,7 @@ function revealSceneUI() {
 }
 
 async function startCamera() {
+  console.log('[lifecycle] startCamera()');
   const btn = document.getElementById('start-btn');
   const logo = document.getElementById('start-logo');
   btn.classList.add('fade-out');
@@ -1960,6 +2084,7 @@ async function loadCameraAndModels() {
   });
   video.srcObject = stream;
   await video.play();
+  console.log(`[lifecycle] camera live (${video.videoWidth}x${video.videoHeight})`);
 
   // Size self-view canvas to match actual video aspect ratio
   if (video.videoWidth && video.videoHeight) {

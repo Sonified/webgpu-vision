@@ -220,7 +220,6 @@ self.onmessage = async (e) => {
           const onnxDevice = await ort.env.webgpu.device;
           await initGPU(onnxDevice);
           useGPUDirect = true;
-          console.log('Face landmark worker: GPU direct path (zero-copy)');
         } catch (gpuErr) {
           console.warn('Face landmark worker: GPU warp unavailable, canvas fallback:', gpuErr.message);
         }
@@ -239,10 +238,7 @@ self.onmessage = async (e) => {
         else if (data.length === 1 && !outputMap.faceFlag) outputMap.faceFlag = name;
       }
 
-      console.log('Face landmark output map:', outputMap,
-        'output names:', session.outputNames,
-        'output sizes:', session.outputNames.map(n => results[n].data.length));
-
+      console.log(`[face-landmark-worker] ready (GPU direct: ${useGPUDirect})`);
       self.postMessage({ type: 'ready', gpuDirect: useGPUDirect });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });
