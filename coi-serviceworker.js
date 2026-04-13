@@ -1,27 +1,57 @@
-/*! coi-serviceworker - enables crossOriginIsolated on hosts without COOP/COEP headers */
+/*! coi-serviceworker - enables crossOriginIsolated + asset caching */
 if (typeof window === 'undefined') {
-  // Service worker context
+  const CACHE_NAME = 'webgpu-vision-v1';
+
+  // File extensions worth caching (models, WASM, JS modules).
+  // HTML is NOT cached so deploys take effect immediately.
+  const CACHEABLE = /\.(wasm|onnx|mjs|js|json|png|jpg|css)(\?|$)/;
+
   self.addEventListener("install", () => self.skipWaiting());
-  self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+  self.addEventListener("activate", (e) => {
+    // Clean up old cache versions
+    e.waitUntil(
+      caches.keys().then(keys =>
+        Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      ).then(() => self.clients.claim())
+    );
+  });
 
   self.addEventListener("fetch", (e) => {
     if (e.request.cache === "only-if-cached" && e.request.mode !== "same-origin") return;
+    if (e.request.method !== "GET") return;
 
-    e.respondWith(
-      fetch(e.request).then((res) => {
-        if (res.status === 0) return res;
+    const url = new URL(e.request.url);
+    const shouldCache = CACHEABLE.test(url.pathname);
 
-        const headers = new Headers(res.headers);
-        headers.set("Cross-Origin-Embedder-Policy", "credentialless");
-        headers.set("Cross-Origin-Opener-Policy", "same-origin");
+    e.respondWith((async () => {
+      // Check cache first for cacheable assets
+      if (shouldCache) {
+        const cached = await caches.match(e.request);
+        if (cached) return cached;
+      }
 
-        return new Response(res.body, {
-          status: res.status,
-          statusText: res.statusText,
-          headers,
-        });
-      }).catch((err) => console.error(err))
-    );
+      const res = await fetch(e.request);
+      if (res.status === 0) return res;
+
+      // Add COEP/COOP headers for crossOriginIsolated
+      const headers = new Headers(res.headers);
+      headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+      headers.set("Cross-Origin-Opener-Policy", "same-origin");
+
+      const response = new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers,
+      });
+
+      // Cache the response for next time (clone because body can only be read once)
+      if (shouldCache && res.status === 200) {
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(e.request, response.clone());
+      }
+
+      return response;
+    })().catch((err) => console.error(err)));
   });
 } else {
   // Main thread: register SW, reload once it takes control
