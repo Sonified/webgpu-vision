@@ -64,7 +64,7 @@ try {
   // Run once for correctness
   log('\nRunning inference...');
   const t0 = performance.now();
-  const outputs = await runner.run(graph, inputBuf);
+  const outputs = await runner.run(graph, inputBuf, allWeights);
   const t1 = performance.now();
   log(`Inference time: ${(t1 - t0).toFixed(1)}ms`);
 

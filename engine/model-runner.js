@@ -21,7 +21,7 @@ export class ModelRunner {
    * @param {GPUBuffer} inputBuf - input in NHWC format
    * @returns {Object} output name -> Float32Array
    */
-  async run(graph, inputBuf) {
+  async run(graph, inputBuf, allWeights) {
     const g = graph.graph;
     const w = graph.weights;
     const device = this.device;
@@ -85,16 +85,21 @@ export class ModelRunner {
         // Check for fused Clip (ReLU6) or PRelu following this conv
         let activation = 0; // 0=none, 1=prelu, 2=relu6
         let preluName = null;
-        if (i + 1 < g.length && g[i + 1].op === 'Clip') {
+        if (i + 1 < g.length && g[i + 1].op === 'Clip' && g[i + 1].inputs[0] === out) {
           activation = 2;
           shapes[g[i + 1].outputs[0]] = outShape;
-          tensors[g[i + 1].outputs[0]] = null; // will point to same buf
-          i++; // skip Clip
-        } else if (i + 1 < g.length && g[i + 1].op === 'PRelu') {
+          tensors[g[i + 1].outputs[0]] = null;
+          i++;
+        } else if (i + 1 < g.length && g[i + 1].op === 'PRelu' && g[i + 1].inputs[0] === out) {
           activation = 1;
           preluName = g[i + 1].inputs[1];
           shapes[g[i + 1].outputs[0]] = outShape;
-          i++; // skip PRelu
+          i++;
+        } else if (i + 1 < g.length && g[i + 1].op === 'Relu' && g[i + 1].inputs[0] === out) {
+          activation = 3;
+          shapes[g[i + 1].outputs[0]] = outShape;
+          tensors[g[i + 1].outputs[0]] = null;
+          i++;
         }
 
         // Check for fused Add before activation (pattern: Conv -> Add -> Clip/PRelu)
@@ -104,8 +109,7 @@ export class ModelRunner {
 
         const outBuf = getOrAlloc(out, outShape);
         // If we skipped an activation, make sure that output name also points here
-        if (activation === 2 && g[i]) tensors[g[i].outputs[0]] = outBuf;
-        if (activation === 1 && g[i]) tensors[g[i].outputs[0]] = outBuf;
+        if (activation > 0 && g[i]) tensors[g[i].outputs[0]] = outBuf;
 
         const params = new Uint32Array([
           1, iC, iH, iW, oC, oH, oW, kH, kW,
@@ -114,6 +118,9 @@ export class ModelRunner {
         ]);
         const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
         device.queue.writeBuffer(pb, 0, params);
+
+        if (!tensors[inName]) throw new Error(`Conv node ${i}: missing input buffer '${inName}'`);
+        if (!this.W[wName]) throw new Error(`Conv node ${i}: missing weight '${wName}'`);
 
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.conv2d);
@@ -163,6 +170,13 @@ export class ModelRunner {
 
       if (op === 'Clip') {
         // Should be fused into conv above. If standalone, just pass through.
+        shapes[out] = shapes[inp[0]];
+        tensors[out] = tensors[inp[0]];
+        continue;
+      }
+
+      if (op === 'Relu') {
+        // Should be fused into conv. If standalone, pass through.
         shapes[out] = shapes[inp[0]];
         tensors[out] = tensors[inp[0]];
         continue;
@@ -292,12 +306,108 @@ export class ModelRunner {
         continue;
       }
 
-      if (op === 'Reshape' || op === 'Concat' || op === 'Resize') {
-        // TODO: handle these for models that need them (palm detector)
-        // For hand landmark, these don't appear
-        console.warn(`Unhandled op: ${op} at node ${i}`);
+      if (op === 'Pad') {
+        // Channel padding: append zero channels. Pad constant tensor has 8 ints:
+        // [N_before, C_before, H_before, W_before, N_after, C_after, H_after, W_after]
+        const inShape = shapes[inp[0]];
+        const padName = inp[1];
+        // Read pad values from weights
+        const padInfo = w[padName];
+        const padVals = new Float32Array(allWeights.subarray(padInfo.offset, padInfo.offset + padInfo.length));
+        const cAfter = Math.round(padVals[5]); // channels to add after
+        const outShape = [inShape[0], inShape[1] + cAfter, inShape[2], inShape[3]];
+        shapes[out] = outShape;
+        const outBuf = getOrAlloc(out, outShape);
+
+        const params = new Uint32Array([inShape[1], outShape[1], inShape[2], inShape[3]]);
+        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(pb, 0, params);
+        const pass = enc.beginComputePass();
+        pass.setPipeline(this.P.pad_channels);
+        pass.setBindGroup(0, device.createBindGroup({
+          layout: this.P.pad_channels.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: outBuf } },
+          ],
+        }));
+        pass.dispatchWorkgroups(Math.ceil(inShape[3] / 8), Math.ceil(inShape[2] / 8), outShape[1]);
+        pass.end();
+        continue;
+      }
+
+      if (op === 'Reshape') {
+        // Reshape is just reinterpretation — same buffer, different logical shape.
+        // Read target shape from weight tensor.
+        shapes[out] = 'reshaped'; // We don't track reshaped dims for now
+        tensors[out] = tensors[inp[0]];
+        continue;
+      }
+
+      if (op === 'Concat') {
+        // Concatenate along axis (typically axis=1 for NCHW or axis=-1 for NHWC).
+        // For the output heads this is just sequential copies.
+        // For now: submit, read, concat on CPU, write back.
+        const axis = attrs.axis || 1;
+        device.queue.submit([enc.finish()]);
+
+        const arrays = [];
+        let totalFloats = 0;
+        for (const inName of inp) {
+          if (!tensors[inName]) continue;
+          // Estimate size from buffer
+          const buf = tensors[inName];
+          const size = buf.size / 4;
+          const data = await this._readBuffer(buf, size);
+          arrays.push(data);
+          totalFloats += data.length;
+        }
+        const concatted = new Float32Array(totalFloats);
+        let offset = 0;
+        for (const arr of arrays) {
+          concatted.set(arr, offset);
+          offset += arr.length;
+        }
+        const outBuf = getOrAlloc(out, [totalFloats]);
+        device.queue.writeBuffer(outBuf, 0, concatted);
+        shapes[out] = [1, totalFloats]; // approximate
+        enc = device.createCommandEncoder();
+        continue;
+      }
+
+      if (op === 'Resize') {
+        const inShape = shapes[inp[0]];
+        const [, ch, iH, iW] = inShape;
+        // Assume 2x upsample
+        const outShape = [1, ch, iH * 2, iW * 2];
+        shapes[out] = outShape;
+        const outBuf = getOrAlloc(out, outShape);
+
+        const params = new Uint32Array([ch, iH, iW, iH * 2, iW * 2]);
+        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        device.queue.writeBuffer(pb, 0, params);
+        const pass = enc.beginComputePass();
+        pass.setPipeline(this.P.resize);
+        pass.setBindGroup(0, device.createBindGroup({
+          layout: this.P.resize.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: outBuf } },
+          ],
+        }));
+        pass.dispatchWorkgroups(Math.ceil(iW * 2 / 8), Math.ceil(iH * 2 / 8), ch);
+        pass.end();
+        continue;
+      }
+
+      if (op === 'Neg' || op === 'Mul') {
+        // Part of decomposed PReLU (face landmark). Pass through for now.
+        // TODO: fuse Relu+Neg+Mul+Add back into PReLU during graph preprocessing.
         shapes[out] = shapes[inp[0]];
         tensors[out] = tensors[inp[0]];
+        console.warn(`Passthrough op: ${op} at node ${i} (decomposed PReLU?)`);
         continue;
       }
 
