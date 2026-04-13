@@ -195,6 +195,11 @@
     <option value="1">1</option>
     <option value="2" selected>2</option>
   </select>
+  <span class="sep" style="color:#888;">Gesture</span>
+  <select id="gesture-mode-select">
+    <option value="grab" selected>Grab</option>
+    <option value="pinch">Pinch</option>
+  </select>
   <button id="reset-cubes-btn" style="margin-left:10px; background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 10px; font-size:0.9rem; cursor:pointer;">Reset Cubes</button>
 </div>
 
@@ -403,8 +408,8 @@ const cubeMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.3 
 function buildCubeData() {
   const positions = [];
   for (let x = -3.24; x <= 3.24; x += 1.62) {
-    for (let y = -1.75; y <= 0.25; y += 2) {
-      for (let z = -15; z <= 2; z += 2.5) {
+    for (let y = -2.75; y <= -0.75; y += 2) {
+      for (let z = -17; z <= -2; z += 2.5) {
         positions.push({ x, y, z, hue: (x + 4) / 8 });
       }
     }
@@ -956,6 +961,18 @@ const pinchThreshold = 0.05;
 // brief gaps that happen when the model momentarily mis-tracks the fingertip
 // or the pinch wobbles. Persisted to localStorage as 'openThresh'.
 let openThresh = parseInt(getSetting('openThresh') || '1') || 1;
+let gestureMode = getSetting('gestureMode') || 'grab'; // 'grab' or 'pinch'
+
+// Gesture mode dropdown
+{
+  const gsel = document.getElementById('gesture-mode-select');
+  gsel.value = gestureMode;
+  gsel.addEventListener('change', (e) => {
+    gestureMode = e.target.value;
+    setSetting('gestureMode', gestureMode);
+    e.target.blur();
+  });
+}
 
 // ============================================================
 // Shared result handlers (used by both backends)
@@ -1132,24 +1149,31 @@ function handleHandResult(landmarks) {
     if (!displayedHands[h]) {
       displayedHands[h] = filtered.map(p => ({ x: p.x, y: p.y, z: p.z }));
     }
-    // Palm open/closed: measure average distance from fingertips (8,12,16,20)
-    // to the palm base (landmark 0 = wrist). Closed fist = small distances,
-    // open hand = large. Much more robust than pinch (thumb-index) because the
-    // model can see the whole hand silhouette even when fingers overlap.
-    let fingertipDist = 0;
-    for (const tip of [8, 12, 16, 20]) {
-      fingertipDist += Math.hypot(
-        filtered[tip].x - wrist.x,
-        filtered[tip].y - wrist.y,
-        filtered[tip].z - wrist.z
+    // Gesture detection: 'grab' uses palm open/closed (average fingertip-to-wrist
+    // distance), 'pinch' uses thumb-index distance. Grab is more robust because
+    // the model can see the whole hand silhouette even when fingers overlap.
+    let gestureActive;
+    if (gestureMode === 'grab') {
+      let fingertipDist = 0;
+      for (const tip of [8, 12, 16, 20]) {
+        fingertipDist += Math.hypot(
+          filtered[tip].x - wrist.x,
+          filtered[tip].y - wrist.y,
+          filtered[tip].z - wrist.z
+        );
+      }
+      fingertipDist /= 4;
+      gestureActive = fingertipDist < 0.20;
+    } else {
+      const dist = Math.hypot(
+        filtered[4].x - filtered[8].x,
+        filtered[4].y - filtered[8].y,
+        filtered[4].z - filtered[8].z
       );
+      gestureActive = dist < pinchThreshold;
     }
-    fingertipDist /= 4; // average
 
-    const gripThreshold = 0.20; // below = closed fist (grab), above = open (release)
-    const closed = fingertipDist < gripThreshold;
-
-    if (closed) {
+    if (gestureActive) {
       handStates[h].pinching = true;
       handStates[h].openCount = 0;
     } else {
@@ -1209,14 +1233,23 @@ function handleGestureInput() {
     const drawHand = displayedHands[h] || hand;
 
     if (hs.pinching && drawHand) {
-      // Palm center: average of wrist (0) and middle finger base (9).
-      // Ball sits in the middle of the palm, not at the fingertips.
-      const palm = {
-        x: (drawHand[0].x + drawHand[9].x) / 2,
-        y: (drawHand[0].y + drawHand[9].y) / 2,
-        z: (drawHand[0].z + drawHand[9].z) / 2,
-      };
-      const pos = landmarkToScene(palm);
+      let holdPoint;
+      if (gestureMode === 'grab') {
+        // Palm center: average of wrist (0) and middle finger base (9).
+        holdPoint = {
+          x: (drawHand[0].x + drawHand[9].x) / 2,
+          y: (drawHand[0].y + drawHand[9].y) / 2,
+          z: (drawHand[0].z + drawHand[9].z) / 2,
+        };
+      } else {
+        // Pinch: midpoint of thumb tip (4) and index tip (8).
+        holdPoint = {
+          x: (drawHand[4].x + drawHand[8].x) / 2,
+          y: (drawHand[4].y + drawHand[8].y) / 2,
+          z: (drawHand[4].z + drawHand[8].z) / 2,
+        };
+      }
+      const pos = landmarkToScene(holdPoint);
       pos.y += 0.5;  // up
       pos.z -= 1.0;  // forward (toward cubes)
 
@@ -1998,14 +2031,12 @@ backendSelect.addEventListener('change', async (e) => {
   for (const f of headFilters) f.reset();
   for (const hand of handFilters) for (const joint of hand) for (const f of joint) f.reset();
 
-  // Tear down current backend
+  // Pause current backend. Don't destroy state — both backends stay preloaded
+  // so switching back is instant. Just stop the active frame loop.
   if (activeBackend === 'mediapipe') {
-    teardownMediaPipe();
+    // MP frame loop stops naturally (sendMediaPipeFrames checks activeBackend)
   } else {
-    gpuReady = false;
     stopWebGPUVfcLoop();
-    gpuHandTracker = null;
-    gpuFaceTracker = null;
   }
 
   // Start new backend
@@ -2013,11 +2044,19 @@ backendSelect.addEventListener('change', async (e) => {
   applyProfile();
   syncInterpAdaptiveAvailability();
   if (newBackend === 'webgpu') {
-    const ok = await initWebGPUBackend();
-    if (ok) {
+    // Both backends stay preloaded. Just restart the VFC loop — gpuReady and
+    // the trackers persist across switches.
+    if (gpuReady) {
+      startWebGPUVfcLoop();
       document.getElementById('backend-label').textContent = 'WebGPU';
     } else {
-      console.warn('WebGPU init failed on backend switch');
+      // First switch to WebGPU, preload may still be running
+      const ok = await initWebGPUBackend();
+      if (ok) {
+        document.getElementById('backend-label').textContent = 'WebGPU';
+      } else {
+        console.warn('WebGPU init failed on backend switch');
+      }
     }
   } else {
     initMediaPipeBackend(parseInt(getSetting('numHands')));
@@ -2072,24 +2111,30 @@ parallaxSelect.addEventListener('change', (e) => {
   e.target.blur();
 });
 
+// On iPhone, only show the upper-left controls menu -- hide the HUD,
+// filter/interp panels, and self-view to keep the screen uncluttered.
+const isIPhone = /iPhone/i.test(navigator.userAgent);
+
 // Reveal the in-game UI (HUD, controls, etc) and start the render loop.
 // Safe to call before the camera or ML models are ready -- the animate()
 // loop just renders the empty 3D scene until tracking comes online.
 function revealSceneUI() {
-  document.getElementById('hud').style.display = 'block';
   document.getElementById('controls').style.display = 'block';
-  const filterEl = document.getElementById('filter-controls');
-  const interpEl = document.getElementById('interp-controls');
-  filterEl.style.display = 'block';
-  interpEl.style.display = 'block';
-  syncInterpAdaptiveAvailability();
-  // Position interp-controls directly beneath filter-controls. Done after
-  // both are visible so the height measurement is accurate. requestAnimationFrame
-  // ensures the layout has flushed before we read getBoundingClientRect.
-  requestAnimationFrame(() => {
-    const r = filterEl.getBoundingClientRect();
-    interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
-  });
+  if (!isIPhone) {
+    document.getElementById('hud').style.display = 'block';
+    const filterEl = document.getElementById('filter-controls');
+    const interpEl = document.getElementById('interp-controls');
+    filterEl.style.display = 'block';
+    interpEl.style.display = 'block';
+    syncInterpAdaptiveAvailability();
+    // Position interp-controls directly beneath filter-controls. Done after
+    // both are visible so the height measurement is accurate. requestAnimationFrame
+    // ensures the layout has flushed before we read getBoundingClientRect.
+    requestAnimationFrame(() => {
+      const r = filterEl.getBoundingClientRect();
+      interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
+    });
+  }
   animate();
 }
 
@@ -2143,8 +2188,10 @@ async function loadCameraAndModels() {
 
   // Reveal the self-view button (and the box itself, if the user had it
   // enabled) now that real video frames exist to draw.
-  document.getElementById('self-view-btn').style.display = 'block';
-  initSelfViewBtn();
+  if (!isIPhone) {
+    document.getElementById('self-view-btn').style.display = 'block';
+    initSelfViewBtn();
+  }
 
   // Camera is rolling. Hide the status box now -- model loading happens in
   // the background and the play instructions are no longer shown.
