@@ -1,7 +1,7 @@
 // Palm detection worker: receives ImageBitmap, does GPU letterbox + inference + decode + NMS.
 // Returns detections with keypoints, ready for slot assignment.
 
-import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.mjs';
+import * as ort from '../vendor/onnxruntime-web/ort.webgpu.min.mjs';
 import { generateAnchors, decodeDetections } from './anchors.js';
 import { weightedNMS } from './nms.js';
 

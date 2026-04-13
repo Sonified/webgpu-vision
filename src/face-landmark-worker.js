@@ -1,7 +1,7 @@
 // Face landmark inference worker: FULL GPU pipeline -- zero CPU readback for preprocessing.
 // Compute shader warp -> GPU buffer -> ONNX tensor (same device) -> inference -> 478 landmarks out.
 
-import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.mjs';
+import * as ort from '../vendor/onnxruntime-web/ort.webgpu.min.mjs';
 
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;

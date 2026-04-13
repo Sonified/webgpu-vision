@@ -1,7 +1,7 @@
 // Face blendshape worker: takes 146 landmark points, outputs 52 expression coefficients.
 // Runs independently from the landmark worker so it doesn't block the next frame.
 
-import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.mjs';
+import * as ort from '../vendor/onnxruntime-web/ort.webgpu.min.mjs';
 
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;
