@@ -204,9 +204,36 @@ export class ModelRunner {
       }
 
       if (op === 'PRelu') {
-        // Should be fused. Pass through.
-        shapes[out] = shapes[inp[0]];
-        tensors[out] = tensors[inp[0]];
+        // Standalone PReLU (after Add, not fusable into Conv).
+        // Dispatch via conv2d shader as a 1x1 identity conv with PReLU activation.
+        // Actually simpler: dispatch a custom pass. Use the add shader in a new mode?
+        // Simplest: read, apply on CPU, write back. PReLU buffers are moderate size.
+        const inShape = shapes[inp[0]];
+        shapes[out] = inShape;
+        let floats = 1;
+        if (inShape && Array.isArray(inShape)) for (const d of inShape) floats *= d;
+        else floats = tensors[inp[0]].size / 4;
+
+        const slopeName = inp[1];
+        const slopeInfo = w[slopeName];
+        const slopeData = allWeights.subarray(slopeInfo.offset, slopeInfo.offset + slopeInfo.length);
+        const C = slopeData.length; // number of channels
+        const spatial = floats / C;
+
+        // Submit pending, read, apply PReLU on CPU, write back
+        device.queue.submit([enc.finish()]);
+        const data = await this._readBuffer(tensors[inp[0]], floats);
+        for (let c = 0; c < C; c++) {
+          const slope = slopeData[c];
+          const base = c * spatial;
+          for (let s = 0; s < spatial; s++) {
+            const idx = base + s;
+            if (data[idx] < 0) data[idx] *= slope;
+          }
+        }
+        const outBuf = getOrAlloc(out, inShape || [floats]);
+        device.queue.writeBuffer(outBuf, 0, data);
+        enc = device.createCommandEncoder();
         continue;
       }
 
