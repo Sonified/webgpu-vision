@@ -1411,15 +1411,23 @@ async function initWebGPUBackend(silent = false) {
     return ok;
   }
   wgpuInitPromise = (async () => {
+    console.log(`[webgpu-check] crossOriginIsolated=${crossOriginIsolated} origin=${location.origin}`);
     if (!crossOriginIsolated) {
-      const msg = 'WebGPU needs COOP/COEP headers. Start the server with: npm run dev';
-      setStatus(msg);
-      console.warn(msg);
-      console.warn('crossOriginIsolated:', crossOriginIsolated);
-      console.warn('Current origin:', location.origin);
+      console.log('[webgpu-check] BLOCKED: crossOriginIsolated is false');
       return false;
     }
     try {
+      // Pre-flight: check if this browser/device can even run WebGPU.
+      // Safari iOS may hang on requestAdapter() so we race it with a timeout.
+      const gpuAvail = !!navigator.gpu;
+      console.log(`[webgpu-check] navigator.gpu=${gpuAvail} crossOriginIsolated=${crossOriginIsolated}`);
+      if (!gpuAvail) { console.warn('[webgpu-check] No navigator.gpu'); return false; }
+      const adapter = await Promise.race([
+        navigator.gpu.requestAdapter(),
+        new Promise(r => setTimeout(() => r(null), 3000))
+      ]);
+      console.log(`[webgpu-check] adapter=${!!adapter}`);
+      if (!adapter) { console.warn('[webgpu-check] requestAdapter() failed or timed out'); return false; }
       setStatus('Loading WebGPU modules...');
       const { HandTracker } = await import('../../src/pipeline.js');
       const { FaceTracker } = await import('../../src/face-pipeline.js');
@@ -1434,7 +1442,13 @@ async function initWebGPUBackend(silent = false) {
       return true;
     } catch (err) {
       console.error('WebGPU init error:', err);
-      setStatus('WebGPU init failed: ' + err.message);
+      // Show the actual error ON SCREEN so it's visible on mobile without
+      // fighting Safari's console. This is the only way to diagnose what
+      // Safari is actually rejecting.
+      const errDiv = document.createElement('div');
+      errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:red;color:white;padding:12px;font:14px monospace;word-break:break-all;';
+      errDiv.textContent = 'WebGPU error: ' + (err.stack || err.message || String(err));
+      document.body.appendChild(errDiv);
       return false;
     }
   })();

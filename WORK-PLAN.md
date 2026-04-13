@@ -397,9 +397,38 @@ Hosting is currently `https://models.now.audio` in production via [model-urls.js
 - `ARCHITECTURE.md` is good. Add a "Demos" section pointing to the hub and the showcase.
 - The "Hold my bear" line in the README is gold. Keep it.
 
-## Phase 4: Pure GPU pipeline (the real hold-my-bear endgame)
+## Phase 4: Drop ONNX Runtime entirely — custom WGSL inference engine
 
-**Status:** designed and parked. Read this carefully before starting — it is an architectural change to the worker contract.
+**Status:** designed and parked. This is no longer just a performance optimization — it is the path to iOS support and the only way to make the demo work on phones.
+
+### Why this just became urgent (2026-04-12)
+
+ONNX Runtime's WebGPU backend **does not work on iOS Safari**. At all. Not our code, not our hosting, not our headers — Microsoft's ORT simply doesn't support iOS WebGPU ([issue #22776](https://github.com/microsoft/onnxruntime/issues/22776)). Even on Safari 26 desktop it has severe CPU/memory issues ([issue #26827](https://github.com/microsoft/onnxruntime/issues/26827)). This means the demo Robert built — the thing that proves WebGPU Vision works — cannot run on any iPhone. MediaPipe is NOT a fallback (see memory: this repo demos WebGPU Vision, period). So either we wait for Microsoft to fix ORT on Safari (timeline unknown), or we drop ORT entirely and run the models ourselves.
+
+### What dropping ORT means
+
+We have the ONNX model files. They contain the weights AND the computation graph. A neural network inference is:
+
+1. Read the graph: "input → Conv2D → Relu → Conv2D → Relu → ... → output"
+2. For each op, dispatch a WebGPU compute shader that runs the math using the stored weights
+3. Feed the output buffer to the next op
+
+Our four models use maybe **15-20 unique operation types** (Conv2D, DepthwiseConv2D, MatMul, Relu, PReLU, Add, Mul, Reshape, Transpose, Sigmoid, Pad, Resize, Concat, Softmax, BatchNorm). Each op is a WGSL compute shader, ~50-100 lines each. The "inference engine" is a loop that walks the graph and dispatches shaders in order.
+
+**Estimated scope:**
+- ~15-20 WGSL compute shaders for the ops our models use
+- A graph parser (read ONNX protobuf or pre-convert to JSON at build time)
+- A graph walker that allocates GPU buffers and dispatches shaders in order
+- ~2000-3000 lines of JS/WGSL total
+- Download: ~50KB instead of 23MB
+- Zero WASM, zero threads, zero SharedArrayBuffer, zero crossOriginIsolated requirement
+- Works everywhere WebGPU works — including iOS Safari
+
+**What we lose:** ONNX Runtime's graph optimizer, operator fusion, memory planner, and the ability to run arbitrary ONNX models. We don't need any of that — we run exactly four small, known, fixed models.
+
+**What we gain:** iOS support, ~450x smaller download, no WASM dependency, no COOP/COEP header requirement, no service worker hacks, works on GitHub Pages natively, total control over the inference pipeline.
+
+### The original Phase 4 plan (still relevant for context)
 
 ### The realization
 

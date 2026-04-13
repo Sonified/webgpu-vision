@@ -54,9 +54,18 @@ if (typeof window === 'undefined') {
     })().catch((err) => console.error(err)));
   });
 } else {
-  // Main thread: register SW, reload once it takes control
+  // Main thread: register SW, reload once it takes control.
+  // If the server already sends real COEP/COOP headers (e.g. Cloudflare Pages),
+  // crossOriginIsolated is already true and the SW would only interfere.
   (async () => {
     if (!("serviceWorker" in navigator)) return;
+    if (crossOriginIsolated) {
+      // Real server headers handle isolation. Kill any leftover SW from
+      // previous deploys that would intercept and break the real headers.
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) r.unregister();
+      return;
+    }
 
     const registration = await navigator.serviceWorker.register(
       new URL("coi-serviceworker.js", document.currentScript.src)

@@ -5,6 +5,20 @@ Include enough context that the next debugging session can pick up cold.
 
 ---
 
+## BLOCKING: ONNX Runtime WebGPU does not work on iOS Safari
+
+**Confirmed 2026-04-12.** iOS 26.4.1, Safari, Cloudflare Pages with correct COEP/COOP headers.
+
+ONNX Runtime's WebGPU execution provider does not support iOS. The `initWebGPUBackend` function never reaches the pre-flight `navigator.gpu` check — it fails silently somewhere during module import or worker spawn. No error surfaces in Safari's console.
+
+This is a Microsoft issue, not ours:
+- [ORT #22776: Support iOS devices](https://github.com/microsoft/onnxruntime/issues/22776)
+- [ORT #26827: Severe CPU/memory issues in Safari/WebKit 26](https://github.com/microsoft/onnxruntime/issues/26827)
+
+**The fix is Phase 4: drop ONNX Runtime entirely and run inference with custom WGSL compute shaders.** See WORK-PLAN.md. This eliminates the 23MB WASM dependency, the SharedArrayBuffer/crossOriginIsolated requirement, and the iOS incompatibility in one move.
+
+---
+
 ## BlazeFace detector: 2x faster but inherently jittery for position tracking
 
 **Measured on M1 Max, Chrome 146, 640x480 camera:**
