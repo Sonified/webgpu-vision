@@ -13,6 +13,26 @@ export class ModelRunner {
     this.P = pipelines;     // { conv2d, maxpool, resize, gemm, global_avg_pool, add }
     this.W = weightBufs;    // weight name -> GPUBuffer
     this.dummy = device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE });
+    // Uniform buffer pool: reuse instead of creating per dispatch
+    this._ubPool = [];
+    this._ubIdx = 0;
+  }
+
+  _getUniformBuf(byteLength) {
+    // Round up to 16-byte alignment
+    const size = Math.ceil(byteLength / 16) * 16;
+    if (this._ubIdx < this._ubPool.length && this._ubPool[this._ubIdx].size >= size) {
+      return this._ubPool[this._ubIdx++];
+    }
+    const buf = this.device.createBuffer({ size: Math.max(size, 64), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    if (this._ubIdx < this._ubPool.length) {
+      this._ubPool[this._ubIdx].destroy();
+      this._ubPool[this._ubIdx] = buf;
+    } else {
+      this._ubPool.push(buf);
+    }
+    this._ubIdx++;
+    return buf;
   }
 
   /**
@@ -45,6 +65,7 @@ export class ModelRunner {
       return buf;
     };
 
+    this._ubIdx = 0; // reset uniform buffer pool for this run
     let enc = device.createCommandEncoder();
 
     for (let i = 0; i < g.length; i++) {
@@ -116,7 +137,7 @@ export class ModelRunner {
           stride[0], stride[1], pads[0], pads[1], group,
           activation, 0, // has_residual = 0 (handled by separate Add)
         ]);
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
 
         if (!tensors[inName]) throw new Error(`Conv node ${i}: missing input buffer '${inName}'`);
@@ -150,7 +171,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, shape);
 
         const params = new Uint32Array([floats, 0]); // mode 0 = plain add
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.add);
@@ -185,7 +206,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, inShape || [floats]);
 
         const params = new Uint32Array([floats, 1]); // mode 1 = relu
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.add);
@@ -204,10 +225,8 @@ export class ModelRunner {
       }
 
       if (op === 'PRelu') {
-        // Standalone PReLU (after Add, not fusable into Conv).
-        // Dispatch via conv2d shader as a 1x1 identity conv with PReLU activation.
-        // Actually simpler: dispatch a custom pass. Use the add shader in a new mode?
-        // Simplest: read, apply on CPU, write back. PReLU buffers are moderate size.
+        // Standalone PReLU on GPU via add.wgsl mode 3.
+        // Slope buffer (per-channel) is in weight buffers; data is NCHW.
         const inShape = shapes[inp[0]];
         shapes[out] = inShape;
         let floats = 1;
@@ -216,41 +235,43 @@ export class ModelRunner {
 
         const slopeName = inp[1];
         const slopeInfo = w[slopeName];
-        const slopeData = allWeights.subarray(slopeInfo.offset, slopeInfo.offset + slopeInfo.length);
-        const C = slopeData.length; // number of channels
+        const C = slopeInfo.length; // number of channels
         const spatial = floats / C;
 
-        // Submit pending, read, apply PReLU on CPU, write back
-        device.queue.submit([enc.finish()]);
-        const data = await this._readBuffer(tensors[inp[0]], floats);
-        for (let c = 0; c < C; c++) {
-          const slope = slopeData[c];
-          const base = c * spatial;
-          for (let s = 0; s < spatial; s++) {
-            const idx = base + s;
-            if (data[idx] < 0) data[idx] *= slope;
-          }
-        }
         const outBuf = getOrAlloc(out, inShape || [floats]);
-        device.queue.writeBuffer(outBuf, 0, data);
-        enc = device.createCommandEncoder();
+        const params = new Uint32Array([floats, 3, C, spatial]); // mode 3 = prelu
+        const pb = this._getUniformBuf(params.byteLength);
+        device.queue.writeBuffer(pb, 0, params);
+        const pass = enc.beginComputePass();
+        pass.setPipeline(this.P.add);
+        pass.setBindGroup(0, device.createBindGroup({
+          layout: this.P.add.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: this.W[slopeName] } },
+            { binding: 3, resource: { buffer: outBuf } },
+          ],
+        }));
+        pass.dispatchWorkgroups(Math.ceil(floats / 256));
+        pass.end();
         continue;
       }
 
       if (op === 'Sigmoid') {
-        // Standalone sigmoid: dispatch Gemm as identity with sigmoid.
-        // M=1, K=N, N=N, no weights needed — but Gemm requires weight buffer.
-        // Simpler: just read, apply on CPU, write back. Only 1-63 floats.
+        // Standalone sigmoid via Gemm shader as identity matmul with sigmoid flag.
+        // Tiny (1-63 floats) but keeping on GPU avoids breaking the encoder chain.
         const inShape = shapes[inp[0]];
         shapes[out] = inShape;
         let floats = 1;
         for (const d of inShape) floats *= d;
+        const outBuf = getOrAlloc(out, inShape);
 
-        // Submit pending work, apply sigmoid on CPU (tiny: 1-63 floats)
+        // Use Gemm as identity: M=1, K=floats, N=floats, no weight/bias, sigmoid=1
+        // Actually Gemm needs a weight matrix. Simpler: keep on CPU for now (only 1-63 floats).
         device.queue.submit([enc.finish()]);
         const data = await this._readBuffer(tensors[inp[0]], floats);
         for (let j = 0; j < data.length; j++) data[j] = 1 / (1 + Math.exp(-data[j]));
-        const outBuf = getOrAlloc(out, inShape);
         device.queue.writeBuffer(outBuf, 0, data);
         enc = device.createCommandEncoder();
         continue;
@@ -267,7 +288,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, outShape);
 
         const params = new Uint32Array([ch, iH, iW, oH, oW, ch]); // no channel padding
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.maxpool);
@@ -291,7 +312,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, [ch]);
 
         const params = new Uint32Array([ch, iH, iW]);
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.global_avg_pool);
@@ -335,7 +356,7 @@ export class ModelRunner {
         if (hasSigmoid && g[i]) tensors[g[i].outputs[0]] = outBuf;
 
         const params = new Uint32Array([1, K, N, bName ? 1 : 0, hasSigmoid]);
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.gemm);
@@ -368,7 +389,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, outShape);
 
         const params = new Uint32Array([inShape[1], outShape[1], inShape[2], inShape[3]]);
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.pad_channels);
@@ -492,7 +513,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, outShape);
 
         const params = new Uint32Array([ch, iH, iW, iH * 2, iW * 2]);
-        const pb = device.createBuffer({ size: params.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
         const pass = enc.beginComputePass();
         pass.setPipeline(this.P.resize);
