@@ -528,11 +528,42 @@ MediaPipe's browser SDK runs at roughly 30-40ms combined for hand + face in the 
 - Total per-frame inference: **~19ms = 52 fps** (vs MediaPipe's ~25-33 fps)
 - And we haven't even wired it in yet -- once running in workers with parallel hand slots, effective latency drops further.
 
-**What's left for Step 6: Wire into demo**
-- Replace ORT workers with WGSL engine in `pipeline.js` / `face-pipeline.js`
-- Delete `vendor/onnxruntime-web/` (23MB gone)
-- Real camera input benchmark (current benchmarks use 0.5 gray images)
-- Extract face blendshape model (face_blendshapes.onnx)
+**Step 6: Wire into demo ✅ DONE (2026-04-13)**
+
+All four inference workers replaced with WGSL engine (palm-worker-wgsl.js, landmark-worker-wgsl.js, face-detection-worker-wgsl.js, face-landmark-worker-wgsl.js). Each worker has its own GPU device for true parallel execution. GPU sigmoid added (add.wgsl mode 4) to fix stale handFlag/handedness in compiled path. MediaPipe backend now fully torn down on switch to free GPU resources.
+
+**Live demo benchmarks (M1 Max, Chrome, 480x360 camera, both hands + face):**
+
+| | WGSL (live) | ORT-WebGPU (live, old) | MediaPipe (live) |
+|---|---|---|---|
+| Hand | 10.6-17ms mean | 8.2ms mean | 29.3ms mean |
+| Face LM | 14.9-19.6ms mean | 13.0ms mean | 25.1ms mean |
+
+WGSL beats MediaPipe by 1.7x (hand) and 1.3x (face). Slightly slower than ORT-WebGPU in live demo because ORT shared one GPU device across all workers via `ort.env.webgpu.device`, while our WGSL workers each create separate devices (GPU contention).
+
+Headless benchmarks (single model, no contention) show the WGSL engine is 2-3x faster than ORT -- the gap is purely device contention in the multi-worker live setup.
+
+**Known issue: GPU device sharing**
+ORT's advantage was sharing one GPU device across workers. WebGPU doesn't allow passing a device across worker boundaries directly. Options for next session:
+- Create device on main thread, run inference on main thread (eliminates worker overhead but blocks main thread)
+- Use a single worker with all models but interleave hand/face on alternating frames (avoids serialization bottleneck of running all 4 every frame)
+- Investigate SharedArrayBuffer-based device sharing (experimental)
+
+**What's left for Step 7: Ship**
+- Resolve GPU device sharing for live perf parity with ORT
+- Delete `vendor/onnxruntime-web/` (23MB -- still needed for blendshape worker)
+- Extract face blendshape model to WGSL (then vendor/ can be fully deleted)
+- Real camera frame correctness verification (current warp outputs NCHW -- verified working but edge cases untested)
+- Push to GitHub Pages
+
+**New engine files added this session:**
+```
+add.wgsl             — Now includes mode 4 (sigmoid) -- zero CPU ops remaining
+palm-worker-wgsl.js  — Palm detection on compiled WGSL engine
+landmark-worker-wgsl.js — Hand landmark on compiled WGSL engine  
+face-detection-worker-wgsl.js — Face detection on compiled WGSL engine
+face-landmark-worker-wgsl.js — Face landmark on compiled WGSL engine
+```
 
 **Current engine files (in `engine/` directory):**
 ```
