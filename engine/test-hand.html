@@ -47,6 +47,7 @@ try {
     global_avg_pool: await mkPipeline('global_avg_pool'),
     add: await mkPipeline('add'),
     fused_block: await mkPipeline('fused_block'),
+    transpose_nhwc: await mkPipeline('transpose_nhwc'),
   };
   log('Shaders compiled');
 
@@ -93,15 +94,15 @@ try {
     }
   }
 
-  // Benchmark
-  log('\n--- Benchmark (50 iterations) ---');
-  // Warmup
-  for (let i = 0; i < 5; i++) await runner.run(graph, inputBuf);
-  const bt0 = performance.now();
+  // Benchmark: compiled
+  log('\n--- Benchmark (50 iterations, compiled) ---');
+  await runner.compile(graph, inputBuf, allWeights);
+  for (let i = 0; i < 5; i++) await runner.runCompiled();
   const N = 50;
-  for (let i = 0; i < N; i++) await runner.run(graph, inputBuf);
+  const bt0 = performance.now();
+  for (let i = 0; i < N; i++) await runner.runCompiled();
   const perFrame = (performance.now() - bt0) / N;
-  log(`WGSL engine: ${perFrame.toFixed(2)} ms/inference`);
+  log(`WGSL compiled: ${perFrame.toFixed(2)} ms/inference`);
 
   // ORT comparison
   try {

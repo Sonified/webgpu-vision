@@ -40,6 +40,7 @@ try {
     gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
     add: await mkP('add'), pad_channels: await mkP('pad_channels'),
     fused_block: await mkP('fused_block'),
+    transpose_nhwc: await mkP('transpose_nhwc'),
   };
   log('Shaders compiled');
 
@@ -74,12 +75,13 @@ try {
     }
   }
 
-  log('\n--- Benchmark (50 iterations) ---');
-  for (let i = 0; i < 3; i++) await runner.run(graph, inputBuf, allWeights);
+  log('\n--- Benchmark (50 iterations, compiled) ---');
+  await runner.compile(graph, inputBuf, allWeights);
+  for (let i = 0; i < 5; i++) await runner.runCompiled();
   const N = 50;
   const bt0 = performance.now();
-  for (let i = 0; i < N; i++) await runner.run(graph, inputBuf, allWeights);
-  log(`WGSL engine: ${((performance.now() - bt0) / N).toFixed(2)} ms/inference`);
+  for (let i = 0; i < N; i++) await runner.runCompiled();
+  log(`WGSL compiled: ${((performance.now() - bt0) / N).toFixed(2)} ms/inference`);
 
   try {
     const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
