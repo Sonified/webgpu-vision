@@ -27,7 +27,7 @@ const logLandmark = makeLogger(2000);
 class FaceDetectionWorker {
   constructor() {
     this.worker = new Worker(
-      new URL('./face-detection-worker.js', import.meta.url),
+      new URL('./face-detection-worker-wgsl.js', import.meta.url),
       { type: 'module' }
     );
     this.pendingResolve = null;
@@ -76,7 +76,7 @@ class FaceDetectionWorker {
 class FaceLandmarkWorker {
   constructor() {
     this.worker = new Worker(
-      new URL('./face-landmark-worker.js', import.meta.url),
+      new URL('./face-landmark-worker-wgsl.js', import.meta.url),
       { type: 'module' }
     );
     this.pendingResolve = null;
