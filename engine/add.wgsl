@@ -3,6 +3,7 @@
 // mode 1 = relu(a) [b ignored]
 // mode 2 = relu(a + b)
 // mode 3 = prelu(a) using b as per-channel slopes [NCHW layout]
+// mode 4 = sigmoid(a) [b ignored]
 
 struct AddParams {
     count: u32,
@@ -28,6 +29,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         let ch = i / params.spatial;
         val = a[i];
         if (val < 0.0) { val = val * b[ch]; }
+    } else if (params.mode == 4u) {
+        val = 1.0 / (1.0 + exp(-a[i]));
     } else {
         val = a[i] + b[i];
         if (params.mode == 2u) { val = max(val, 0.0); }

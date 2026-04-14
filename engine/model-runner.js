@@ -455,21 +455,25 @@ export class ModelRunner {
       }
 
       if (op === 'Sigmoid') {
-        // Standalone sigmoid via Gemm shader as identity matmul with sigmoid flag.
-        // Tiny (1-63 floats) but keeping on GPU avoids breaking the encoder chain.
+        // GPU sigmoid via add.wgsl mode 4
         const inShape = shapes[inp[0]];
         shapes[out] = inShape;
         let floats = 1;
         for (const d of inShape) floats *= d;
         const outBuf = getOrAlloc(out, inShape);
 
-        // Use Gemm as identity: M=1, K=floats, N=floats, no weight/bias, sigmoid=1
-        // Actually Gemm needs a weight matrix. Simpler: keep on CPU for now (only 1-63 floats).
-        device.queue.submit([enc.finish()]);
-        const data = await this._readBuffer(tensors[inp[0]], floats);
-        for (let j = 0; j < data.length; j++) data[j] = 1 / (1 + Math.exp(-data[j]));
-        device.queue.writeBuffer(outBuf, 0, data);
-        enc = device.createCommandEncoder();
+        const params = new Uint32Array([floats, 4, 0, 0]); // mode 4 = sigmoid
+        const pb = this._getUniformBuf(params.byteLength);
+        device.queue.writeBuffer(pb, 0, params);
+        dispatch(enc, this.P.add, device.createBindGroup({
+          layout: this.P.add.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: this.dummy } },
+            { binding: 3, resource: { buffer: outBuf } },
+          ],
+        }), Math.ceil(floats / 256));
         continue;
       }
 

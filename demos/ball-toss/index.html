@@ -2285,20 +2285,16 @@ function syncInterpAdaptiveAvailability() {
 
 document.getElementById('start-btn').addEventListener('click', startCamera);
 
-// Preload BOTH backends on page load while the splash screen is showing.
-// Whichever backend the user has selected loads first, then the other starts.
-// By the time the user clicks Start Camera, both are likely ready, and
-// switching between them via the dropdown is instant.
+// Only preload the SELECTED backend. WGSL workers each create their own GPU device,
+// so running both backends simultaneously causes GPU contention and flickering.
+// The other backend inits on-demand if the user switches via dropdown.
 {
   const preferred = getSetting('backend');
   if (preferred === 'mediapipe') {
     initMediaPipeBackend(parseInt(getSetting('numHands')));
-    initWebGPUBackend(true).catch(err => console.warn('WebGPU preload failed:', err));
   } else {
-    initWebGPUBackend(true).then(() => {
-      initMediaPipeBackend(parseInt(getSetting('numHands')));
-    }).catch(err => {
-      console.warn('WebGPU preload failed:', err);
+    initWebGPUBackend(true).catch(err => {
+      console.warn('WebGPU preload failed, falling back to MediaPipe:', err);
       initMediaPipeBackend(parseInt(getSetting('numHands')));
     });
   }
