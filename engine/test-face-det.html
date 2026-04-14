@@ -78,12 +78,19 @@ try {
     }
   }
 
-  log('\n--- Benchmark (50 iterations) ---');
+  log('\n--- Benchmark: interpreted (50 iterations) ---');
   for (let i = 0; i < 5; i++) await runner.run(graph, inputBuf, allWeights);
   const N = 50;
   const bt0 = performance.now();
   for (let i = 0; i < N; i++) await runner.run(graph, inputBuf, allWeights);
-  log(`WGSL engine: ${((performance.now() - bt0) / N).toFixed(2)} ms/inference`);
+  log(`WGSL interpreted: ${((performance.now() - bt0) / N).toFixed(2)} ms/inference`);
+
+  log('\n--- Benchmark: compiled (50 iterations) ---');
+  await runner.compile(graph, inputBuf, allWeights);
+  for (let i = 0; i < 5; i++) await runner.runCompiled();
+  const ct0 = performance.now();
+  for (let i = 0; i < N; i++) await runner.runCompiled();
+  log(`WGSL compiled:    ${((performance.now() - ct0) / N).toFixed(2)} ms/inference`);
 
   try {
     const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');

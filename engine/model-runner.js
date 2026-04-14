@@ -68,6 +68,25 @@ export class ModelRunner {
 
     this._ubIdx = 0; // reset uniform buffer pool for this run
 
+    // Dispatch helper: executes AND records if compiling
+    const dispatch = (enc, pipeline, bindGroup, x, y, z) => {
+      const wx = x|0, wy = (y||1)|0, wz = (z||1)|0;
+      const pass = enc.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(wx, wy, wz);
+      pass.end();
+      if (this._recording) {
+        this._steps.push({ type: 'dispatch', pipeline, bindGroup, x: wx, y: wy, z: wz });
+      }
+    };
+    const copyBuf = (enc, src, srcOff, dst, dstOff, bytes) => {
+      enc.copyBufferToBuffer(src, srcOff, dst, dstOff, bytes);
+      if (this._recording) {
+        this._steps.push({ type: 'copy', src, srcOff, dst, dstOff, bytes });
+      }
+    };
+
     // --- Fused block pattern detection ---
     // Pattern: Conv(DW) -> Conv(1x1) -> [Pad ->] Add -> Relu/PRelu/Clip
     // Mark fuseable sequences so the main loop can dispatch fused_block instead.
@@ -253,9 +272,7 @@ export class ModelRunner {
         const pb = this._getUniformBuf(desc.byteLength);
         device.queue.writeBuffer(pb, 0, desc);
 
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.fused_block);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.fused_block, device.createBindGroup({
           layout: this.P.fused_block.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -264,9 +281,7 @@ export class ModelRunner {
             { binding: 3, resource: { buffer: residualInput || this.dummy } },
             { binding: 4, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(oW / 8), Math.ceil(oH / 8), oC);
-        pass.end();
+        }), Math.ceil(oW / 8), Math.ceil(oH / 8), oC);
         continue;
       }
 
@@ -338,9 +353,7 @@ export class ModelRunner {
         if (!tensors[inName]) throw new Error(`Conv node ${i}: missing input buffer '${inName}'`);
         if (!this.W[wName]) throw new Error(`Conv node ${i}: missing weight '${wName}'`);
 
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.conv2d);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.conv2d, device.createBindGroup({
           layout: this.P.conv2d.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -351,9 +364,7 @@ export class ModelRunner {
             { binding: 5, resource: { buffer: this.dummy } }, // no residual
             { binding: 6, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(oW / 8), Math.ceil(oH / 8), oC);
-        pass.end();
+        }), Math.ceil(oW / 8), Math.ceil(oH / 8), oC);
         continue;
       }
 
@@ -368,9 +379,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 0]); // mode 0 = plain add
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.add);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -378,9 +387,7 @@ export class ModelRunner {
             { binding: 2, resource: { buffer: tensors[inB] } },
             { binding: 3, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(floats / 256));
-        pass.end();
+        }), Math.ceil(floats / 256));
         continue;
       }
 
@@ -403,9 +410,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 1]); // mode 1 = relu
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.add);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -413,9 +418,7 @@ export class ModelRunner {
             { binding: 2, resource: { buffer: this.dummy } }, // b unused in mode 1
             { binding: 3, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(floats / 256));
-        pass.end();
+        }), Math.ceil(floats / 256));
         continue;
       }
 
@@ -437,9 +440,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 3, C, spatial]); // mode 3 = prelu
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.add);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -447,9 +448,7 @@ export class ModelRunner {
             { binding: 2, resource: { buffer: this.W[slopeName] } },
             { binding: 3, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(floats / 256));
-        pass.end();
+        }), Math.ceil(floats / 256));
         continue;
       }
 
@@ -485,18 +484,14 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW, oH, oW, ch]); // no channel padding
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.maxpool);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.maxpool, device.createBindGroup({
           layout: this.P.maxpool.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
             { binding: 1, resource: { buffer: tensors[inp[0]] } },
             { binding: 2, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(oW / 8), Math.ceil(oH / 8), ch);
-        pass.end();
+        }), Math.ceil(oW / 8), Math.ceil(oH / 8), ch);
         continue;
       }
 
@@ -509,18 +504,14 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.global_avg_pool);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.global_avg_pool, device.createBindGroup({
           layout: this.P.global_avg_pool.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
             { binding: 1, resource: { buffer: tensors[inp[0]] } },
             { binding: 2, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(ch / 64));
-        pass.end();
+        }), Math.ceil(ch / 64));
         continue;
       }
 
@@ -553,9 +544,7 @@ export class ModelRunner {
         const params = new Uint32Array([1, K, N, bName ? 1 : 0, hasSigmoid]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.gemm);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.gemm, device.createBindGroup({
           layout: this.P.gemm.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
@@ -564,9 +553,7 @@ export class ModelRunner {
             { binding: 3, resource: { buffer: bName ? this.W[bName] : this.dummy } },
             { binding: 4, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(N / 64));
-        pass.end();
+        }), Math.ceil(N / 64));
         continue;
       }
 
@@ -586,18 +573,14 @@ export class ModelRunner {
         const params = new Uint32Array([inShape[1], outShape[1], inShape[2], inShape[3]]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.pad_channels);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.pad_channels, device.createBindGroup({
           layout: this.P.pad_channels.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
             { binding: 1, resource: { buffer: tensors[inp[0]] } },
             { binding: 2, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(inShape[3] / 8), Math.ceil(inShape[2] / 8), outShape[1]);
-        pass.end();
+        }), Math.ceil(inShape[3] / 8), Math.ceil(inShape[2] / 8), outShape[1]);
         continue;
       }
 
@@ -659,18 +642,14 @@ export class ModelRunner {
             const tParams = new Uint32Array([C, H, Wd, 0]);
             const tpb = this._getUniformBuf(tParams.byteLength);
             device.queue.writeBuffer(tpb, 0, tParams);
-            const pass = enc.beginComputePass();
-            pass.setPipeline(this.P.transpose_nhwc);
-            pass.setBindGroup(0, device.createBindGroup({
+            dispatch(enc, this.P.transpose_nhwc, device.createBindGroup({
               layout: this.P.transpose_nhwc.getBindGroupLayout(0),
               entries: [
                 { binding: 0, resource: { buffer: tpb } },
                 { binding: 1, resource: { buffer: buf } },
                 { binding: 2, resource: { buffer: nhwcBuf } },
               ],
-            }));
-            pass.dispatchWorkgroups(Math.ceil(nFloats / 256));
-            pass.end();
+            }), Math.ceil(nFloats / 256));
             pieces.push({ buf: nhwcBuf, floats: nFloats });
           } else {
             pieces.push({ buf, floats: nFloats });
@@ -682,7 +661,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, [1, totalFloats]);
         let dstOffset = 0;
         for (const piece of pieces) {
-          enc.copyBufferToBuffer(piece.buf, 0, outBuf, dstOffset * 4, piece.floats * 4);
+          copyBuf(enc, piece.buf, 0, outBuf, dstOffset * 4, piece.floats * 4);
           dstOffset += piece.floats;
         }
         shapes[out] = [1, totalFloats];
@@ -700,18 +679,14 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW, iH * 2, iW * 2]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.P.resize);
-        pass.setBindGroup(0, device.createBindGroup({
+        dispatch(enc, this.P.resize, device.createBindGroup({
           layout: this.P.resize.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
             { binding: 1, resource: { buffer: tensors[inp[0]] } },
             { binding: 2, resource: { buffer: outBuf } },
           ],
-        }));
-        pass.dispatchWorkgroups(Math.ceil(iW * 2 / 8), Math.ceil(iH * 2 / 8), ch);
-        pass.end();
+        }), Math.ceil(iW * 2 / 8), Math.ceil(iH * 2 / 8), ch);
         continue;
       }
 
@@ -726,6 +701,9 @@ export class ModelRunner {
 
       console.warn(`Unknown op: ${op} at node ${i}`);
     }
+
+    // Save tensor refs for compile()
+    if (this._recording) this._capturedTensors = tensors;
 
     // Submit final commands
     device.queue.submit([enc.finish()]);
@@ -756,6 +734,74 @@ export class ModelRunner {
       if (tensors[name]) {
         outputs[name] = await this._readBuffer(tensors[name], floats);
       }
+    }
+    return outputs;
+  }
+
+  /**
+   * Compile a model into a replayable command sequence.
+   * Does one full run() to walk the graph, allocate all buffers, and build
+   * bind groups. Captures every dispatch and copy into a flat _steps array.
+   * After compile(), call runCompiled() for zero-overhead execution.
+   *
+   * IMPORTANT: inputBuf must be the SAME GPUBuffer every frame.
+   * Write new pixel data into it with device.queue.writeBuffer() before calling runCompiled().
+   */
+  async compile(graph, inputBuf, allWeights) {
+    // Phase 1: do a full run() to build tensors, shapes, and execute once
+    this._recording = true;
+    this._steps = [];
+    const outputs = await this.run(graph, inputBuf, allWeights);
+    this._recording = false;
+
+    // Save output buffer references and defs for readback
+    this._outputDefs = graph.outputs;
+    this._outputBufs = {};
+    // The tensors map was local to run(), but we captured all the buffer refs
+    // in the steps. We need the output buffers. Re-derive from the last run.
+    // Actually, let's re-run to capture tensors. Simpler: store them during run.
+
+    // Phase 2: re-run once more to capture the tensor map
+    // (the first run was for recording steps, this captures buffer refs)
+    // Actually we already have them from _compiledTensors set during run
+    this._outputBufs = {};
+    for (const outDef of graph.outputs) {
+      if (this._capturedTensors && this._capturedTensors[outDef.name]) {
+        this._outputBufs[outDef.name] = {
+          buf: this._capturedTensors[outDef.name],
+          floats: outDef.shape.reduce((a, b) => a * b, 1),
+        };
+      }
+    }
+
+    console.log(`[compiled] ${this._steps.length} GPU steps pre-built`);
+    return outputs;
+  }
+
+  /**
+   * Execute pre-compiled model. Zero graph walking, zero allocation, zero bind group creation.
+   * Just encode and submit.
+   */
+  async runCompiled() {
+    const enc = this.device.createCommandEncoder();
+    for (const s of this._steps) {
+      if (s.type === 'dispatch') {
+        const pass = enc.beginComputePass();
+        pass.setPipeline(s.pipeline);
+        pass.setBindGroup(0, s.bindGroup);
+        pass.dispatchWorkgroups(s.x, s.y, s.z);
+        pass.end();
+      } else if (s.type === 'copy') {
+        enc.copyBufferToBuffer(s.src, s.srcOff, s.dst, s.dstOff, s.bytes);
+      }
+    }
+    this.device.queue.submit([enc.finish()]);
+    await this.device.queue.onSubmittedWorkDone();
+
+    // Read outputs
+    const outputs = {};
+    for (const [name, info] of Object.entries(this._outputBufs)) {
+      outputs[name] = await this._readBuffer(info.buf, info.floats);
     }
     return outputs;
   }
