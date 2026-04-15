@@ -127,15 +127,72 @@ These prove the engine itself is fast. The gap between headless and live is pure
 5. **Subgroup operations** -- WebGPU subgroups proposal could enable within-wave reductions for NMS/decode
 6. **Frame skipping** -- run inference every 2nd or 3rd frame, interpolate between (the demo already has interpolation infrastructure)
 
+### G. Unified submit: warps folded into inference encoder (REVERTED)
+- **What:** Encode warp dispatches + inference dispatches + readback copies into ONE command encoder, ONE queue.submit().
+- **Result:** Hand: **15.2ms** (regression from 13.5ms). Face: **22.6ms** (regression from 19.4ms).
+- **Why it's slower:** By waiting to encode ALL warps before submitting, the GPU sits idle during the encoding phase. The previous approach (separate warp submits) let the GPU START warp execution immediately while JS was still encoding inference dispatches. The overlap between GPU warp execution and JS encoding was free parallelism we lost by batching.
+- **Key insight:** More batching is NOT always better. GPU/CPU overlap matters. Submitting warp work early lets the GPU chew on it while the CPU prepares the next batch. Holding everything for one mega-submit increases latency because the GPU has nothing to do while the CPU encodes.
+- **Status:** Reverted to separate warp submits + batched inference.
+
+### H. WebGPU single compute pass (multiple dispatches, implicit barriers)
+- **What:** Searched the WebGPU spec and confirmed: multiple dispatchWorkgroups() in ONE compute pass have implicit serial memory semantics. No need for beginComputePass/end per dispatch.
+- **Result:** Applied in engine. ~5% improvement in headless. Removes 34-106 pass boundary transitions per model.
+- **Source:** [gpuweb discussion #4434](https://github.com/gpuweb/gpuweb/discussions/4434)
+
+### I. Cross-workgroup sync research (NOT POSSIBLE in WebGPU)
+- **What:** Investigated running entire neural network in one dispatch (Level 3 fusion).
+- **Findings:**
+  - WebGPU has NO cross-workgroup synchronization. `storageBarrier()` only syncs within one workgroup (max 256 threads).
+  - CUDA has Cooperative Groups + `cudaLaunchCooperativeKernel` for grid-wide sync. WebGPU has no equivalent.
+  - Atomic spin-lock workaround is "taboo" -- works on some hardware, deadlocks on others due to no forward progress guarantees.
+  - The [WebGPU dispatch overhead paper (2024)](https://arxiv.org/abs/2604.02344) explicitly says cooperative groups and persistent kernels are needed as spec-level changes.
+  - The [Decoupled Fallback paper](https://dlnext.acm.org/doi/pdf/10.1145/3694906.3743326) shows portable single-pass prefix scan using atomics -- a possible path for specific operations but not full neural network orchestration.
+- **Status:** Not implementable with current WebGPU spec. Monitoring gpuweb proposals.
+
+---
+
+## Shader-level optimizations (the compute itself)
+
+### 8. Workgroup shared memory for depthwise conv
+- **What:** DW conv loads the input tile (8x8 output region + kernel halo) into `var<workgroup>` shared memory. Each input pixel is read from global memory ONCE by one thread, then all threads in the workgroup read from fast local memory for the convolution.
+- **Why it matters:** A 3x3 DW conv without shared memory reads each input pixel up to 9 times from global memory (once per kernel position that overlaps it). With shared memory, it's read once. For 5x5 kernels, the savings are up to 25x fewer global reads.
+- **Gotchas fixed:**
+  - Unsigned subtraction wrap: `wgid * 8 * stride - pad` wraps negative when pad > 0 at workgroup 0. Fixed with signed `i32` arithmetic.
+  - Stride-2 tile size: an 8x8 output with stride 2 needs an 18x18 input tile (not 10x10). Shared memory sized to 20x20=400 floats to cover worst case (stride 2, 5x5 kernel).
+  - Uniform control flow: `workgroupBarrier()` can't be inside a bounds-check `if`. Restructured so all threads participate in barrier, only in-bounds threads compute.
+  - `in_c_idx` must be `oc` for pure depthwise (output channel == input channel), not `in_c_start`.
+- **Result:** Massive win for DW-heavy models. Hand landmark (MobileNetV2): **6.40ms -> 3.20ms (2x)**. Palm: **13.10ms -> 9.75ms (25%)**. Face LM: **8.46ms -> 7.02ms (17%)**.
+
+### 9. Vec4 dot product for 1x1 pointwise conv
+- **What:** For 1x1 convolutions (which are just matrix multiplies), load 4 input channels and 4 weights at once as `vec4<f32>`, use `dot()` for the multiply-accumulate. 4x fewer memory transactions per iteration.
+- **Result:** Combined with shared memory DW, contributes to the 2x hand speedup. 1x1 convs are the bottleneck in MobileNetV2's expand-project pattern.
+- **Cost:** Handles remainder channels (when `channels_per_group` not divisible by 4) with scalar loop.
+
+---
+
+## Updated headless benchmarks (the ceiling)
+
+| Model | Original baseline | After all shader opts | ORT WASM | vs ORT |
+|---|---|---|---|---|
+| Palm | 18.61ms | **9.75ms** | 27.83ms | **2.9x faster** |
+| Hand | 12.67ms | **3.20ms** | 17.45ms | **5.5x faster** |
+| Face det | 12.70ms | **3.11ms** | 3.10ms | parity |
+| Face LM | 53.61ms | **7.02ms** | 13.58ms | **1.9x faster** |
+
+Hand landmark is now **5.5x faster than ORT WASM** in isolated benchmarks. The engine itself is no longer the bottleneck -- any remaining live demo gap is purely JS/worker architecture overhead.
+
 ---
 
 ## The honest truth
 
-Our engine is **2-3x faster than ORT** in isolated benchmarks. The live demo gap (13.5ms vs 8.2ms for hand) is purely JS/architecture overhead:
-- Message passing between main thread and worker
-- Separate warp shader submits
-- Per-model readback cycles
+Our engine is **2-5.5x faster than ORT** in isolated benchmarks. The live demo numbers (13.5ms hand, 19.4ms face) include JS overhead:
+- Message passing between main thread and worker (~1-2ms)
+- Warp shader submits for camera frame preprocessing (~2-3ms)
+- Staging buffer readback via mapAsync (~2-3ms)
+- Post-processing (anchor decode, NMS, projection) (~1ms)
 
-ORT avoids most of this by running inside WASM with direct GPU API access. We're paying the JS tax on every frame. The batched submit architecture is the right direction -- it's closing the gap. The next wins are in reducing the number of separate GPU submits (fold warps into the batch) and reducing readback (keep more data on GPU).
+ORT avoids some of this by running inside WASM with tighter GPU API access. We're paying the JS tax on every frame.
 
-We are **1.6-2.2x faster than MediaPipe** on all models. That was the original goal and we've achieved it. The ORT parity chase is a bonus round.
+The shader optimizations (shared memory, vec4) attack the GPU compute time directly. The architecture optimizations (batched submit, single pass) attack the JS overhead. Both fronts matter.
+
+We are **1.6-2.2x faster than MediaPipe** in the live demo. The headless engine is **2-5.5x faster than ORT WASM**. The remaining work is closing the gap between headless potential and live demo reality.
