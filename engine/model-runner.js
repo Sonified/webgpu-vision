@@ -788,8 +788,19 @@ export class ModelRunner {
   /**
    * Execute pre-compiled model. Zero graph walking, zero allocation, zero bind group creation.
    * Just encode, submit, and read back via pre-allocated staging buffers.
+   * Serialized: only one runCompiled() per runner at a time (staging buffer reuse).
    */
   async runCompiled() {
+    // Mutex: wait for previous run to finish before starting a new one
+    while (this._running) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+    this._running = true;
+    try { return await this._runCompiledInner(); }
+    finally { this._running = false; }
+  }
+
+  async _runCompiledInner() {
     const device = this.device;
     const enc = device.createCommandEncoder();
 
