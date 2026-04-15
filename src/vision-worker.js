@@ -173,7 +173,11 @@ async function loadModel(jsonUrl, binUrl) {
 
 async function init() {
   const adapter = await navigator.gpu.requestAdapter();
-  device = await adapter.requestDevice();
+  const hasF16 = adapter.features.has('shader-f16');
+  device = await adapter.requestDevice({
+    requiredFeatures: hasF16 ? ['shader-f16'] : [],
+  });
+  console.log(`[vision-worker] shader-f16: ${hasF16}`);
   sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
   // Create shared pipelines

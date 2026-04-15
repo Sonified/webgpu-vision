@@ -163,6 +163,14 @@ These prove the engine itself is fast. The gap between headless and live is pure
   - `in_c_idx` must be `oc` for pure depthwise (output channel == input channel), not `in_c_start`.
 - **Result:** Massive win for DW-heavy models. Hand landmark (MobileNetV2): **6.40ms -> 3.20ms (2x)**. Palm: **13.10ms -> 9.75ms (25%)**. Face LM: **8.46ms -> 7.02ms (17%)**.
 
+### 10. Fused inverted residual (REJECTED -- too much redundant compute)
+- **What:** Fuse entire MobileNetV2 inverted residual block (expand 1x1 -> ReLU6 -> DW 3x3 -> ReLU6 -> project 1x1 -> Add) into a single dispatch. Wrote `fused_invres.wgsl`. Each output thread recomputes the expand and DW results on-the-fly.
+- **Result:** Hand landmark: 3.20ms -> **21.82ms** (6.8x SLOWER). Only 3 blocks fused.
+- **Why it failed:** The expand 1x1 is recomputed for every DW kernel position (9x) AND for every output channel. With expand ratio 6x (16->96 channels), each output thread does 9 × 16 = 144 expand multiplies × 96 expanded channels = 13,824 total. Unfused, the expand is computed once: 16 × 96 = 1,536 total. That's **9x redundant compute** -- the dispatch overhead savings (~147μs for 3 dispatches) are dwarfed by 18ms of extra math.
+- **Key insight:** Kernel fusion only wins when the intermediate result is small relative to the recomputation cost. DW -> 1x1 fusion works because the DW output is one float per channel (no spatial recomputation). Expand -> DW -> Project fusion fails because the expand output is spatially large and gets recomputed at every kernel position.
+- **Rule of thumb:** Fuse when the intermediate has fewer elements than the outer loop iterations. Don't fuse when the intermediate is wider than the output.
+- **Status:** Shader exists at `fused_invres.wgsl` but is NOT wired in. Kept for reference.
+
 ### 9. Vec4 dot product for 1x1 pointwise conv
 - **What:** For 1x1 convolutions (which are just matrix multiplies), load 4 input channels and 4 weights at once as `vec4<f32>`, use `dot()` for the multiply-accumulate. 4x fewer memory transactions per iteration.
 - **Result:** Combined with shared memory DW, contributes to the 2x hand speedup. 1x1 convs are the bottleneck in MobileNetV2's expand-project pattern.
