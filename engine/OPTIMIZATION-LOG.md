@@ -227,6 +227,17 @@ Built from scratch. No ONNX Runtime. No WASM. Pure WebGPU compute shaders.
 
 The key was NOT architecture (unified vs separate workers) -- it was **shader-level compute optimization**. The shared memory DW conv (2x hand speedup) and vec4 pointwise accumulation gave us the compute parity. The separate worker architecture then preserved the parallelism that the unified worker lost.
 
+### 12. Bitmap clone optimization (NO IMPROVEMENT)
+- **What:** Create one ImageBitmap from video, then clone via `createImageBitmap(bitmap)` for the second hand slot instead of two `createImageBitmap(video)` calls.
+- **Result:** Hand: 9.5ms -> 10.8ms (13% SLOWER)
+- **Why it didn't help:** `createImageBitmap(bitmap)` is NOT faster than `createImageBitmap(video)` -- both decode full pixel buffers. The clone path added sequential overhead (create first bitmap, THEN clone) instead of the original which created both in parallel inside Promise.all.
+- **Status:** Reverted.
+
+### 13. Hand oversampling fix (SHIPPED)
+- **What:** Added 16ms minimum interval gate to `processWebGPUHands()` to prevent calling inference twice per video frame.
+- **Result:** Hand oversampling dropped from 2.0x to 1.0x. Freed GPU cycles. Revealed that the 8.2ms "parity" number was inflated by double processing.
+- **Honest numbers:** Hand 9.5ms, Face 13.2ms with clean 1.0x sampling.
+
 ### What we learned
 - Architecture experiments (unified worker, batched submit, warp folding) gave ~10-20% improvements at best
 - Shader compute optimizations (shared memory, vec4) gave **2x** improvements
