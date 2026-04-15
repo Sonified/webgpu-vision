@@ -235,11 +235,22 @@ export class HandTracker {
         });
       }
 
-      // Parallel landmark inference via Promise.all
+      // Pre-create bitmaps: one from video, clone from that (faster than two video decodes)
+      const activeSlots = this.slots.filter(s => s.active);
+      const bitmaps = [];
+      if (activeSlots.length > 0) {
+        const src = await createImageBitmap(video);
+        bitmaps.push(src);
+        for (let b = 1; b < activeSlots.length; b++) {
+          bitmaps.push(await createImageBitmap(src));
+        }
+      }
+      let bmpIdx = 0;
+
       const results = await Promise.all(this.slots.map(async (slot) => {
         if (!slot.active) return null;
 
-        const bitmap = await createImageBitmap(video);
+        const bitmap = bitmaps[bmpIdx++];
         const result = await slot.worker.infer(bitmap, slot.rect, vw, vh);
 
         if (result.handFlag > HAND_FLAG_THRESHOLD) {
