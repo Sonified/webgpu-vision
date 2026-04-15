@@ -238,6 +238,13 @@ The key was NOT architecture (unified vs separate workers) -- it was **shader-le
 - **Result:** Hand oversampling dropped from 2.0x to 1.0x. Freed GPU cycles. Revealed that the 8.2ms "parity" number was inflated by double processing.
 - **Honest numbers:** Hand 9.5ms, Face 13.2ms with clean 1.0x sampling.
 
+### Known issue: 1.3ms hand gap vs ORT-WebGPU
+- **WGSL hand: 9.5ms** vs **ORT hand: 8.2ms** (16% slower)
+- **WGSL face: 13.2ms** vs **ORT face: 13.0ms** (parity)
+- The gap is postMessage + createImageBitmap + structured clone overhead. ORT avoids this by running inference inside WASM on the same thread as GPU commands. We can't eliminate these browser API costs without moving inference off workers -- which would block the main thread.
+- Both are well under the 33ms frame budget at 30fps. The 1.3ms is invisible to the user.
+- Potential future fix: WebGPU may eventually support transferring GPU textures across workers, eliminating the bitmap decode step entirely.
+
 ### What we learned
 - Architecture experiments (unified worker, batched submit, warp folding) gave ~10-20% improvements at best
 - Shader compute optimizations (shared memory, vec4) gave **2x** improvements
