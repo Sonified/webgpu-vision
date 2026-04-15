@@ -791,13 +791,17 @@ export class ModelRunner {
    * Each runner instance has its own buffers -- safe to run different runners concurrently.
    */
   async runCompiled() {
-    const device = this.device;
-    const enc = device.createCommandEncoder();
+    const enc = this.device.createCommandEncoder();
+    this.encodeInto(enc);
+    this.device.queue.submit([enc.finish()]);
+    return await this.readOutputs();
+  }
 
-    // Batch all compute dispatches into ONE pass -- implicit barriers between
-    // dispatches guarantee serial memory semantics. The GPU driver can then
-    // optimize the whole sequence as one unit (fuse barriers, overlap independent work).
-    // Buffer copies (Concat assembly, readback) go between/after compute passes.
+  /**
+   * Encode this model's dispatches + readback copies into an EXTERNAL encoder.
+   * Allows multiple models to share one encoder + one submit.
+   */
+  encodeInto(enc) {
     let pass = null;
     for (const s of this._steps) {
       if (s.type === 'dispatch') {
@@ -806,7 +810,6 @@ export class ModelRunner {
         pass.setBindGroup(0, s.bindGroup);
         pass.dispatchWorkgroups(s.x, s.y, s.z);
       } else if (s.type === 'copy') {
-        // Must end compute pass before encoder-level copy
         if (pass) { pass.end(); pass = null; }
         enc.copyBufferToBuffer(s.src, s.srcOff, s.dst, s.dstOff, s.bytes);
       }
@@ -817,11 +820,10 @@ export class ModelRunner {
     for (const info of this._readbackInfos) {
       enc.copyBufferToBuffer(info.src, 0, info.staging, 0, info.bytes);
     }
+  }
 
-    // Single submit, single await
-    device.queue.submit([enc.finish()]);
-
-    // Map all staging buffers in parallel
+  /** Read outputs from staging buffers (call after submit + GPU completion). */
+  async readOutputs() {
     const outputs = {};
     await Promise.all(this._readbackInfos.map(async (info) => {
       await info.staging.mapAsync(GPUMapMode.READ);

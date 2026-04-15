@@ -250,9 +250,52 @@ async function init() {
   faceAnchors = generateFaceAnchors();
 }
 
-// Every response echoes back the reqId from the request so the main thread
-// can route it to the correct Promise. This fixes the old bug where two
-// concurrent handLandmark requests would cross-match responses.
+// ── Batched command encoding ──
+// Queue incoming requests, encode ALL into one command encoder, submit once,
+// then read back all outputs and respond. This mimics how ORT batches
+// multiple model executions on one device.
+
+let _queue = [];
+let _flushScheduled = false;
+
+function enqueue(entry) {
+  _queue.push(entry);
+  if (!_flushScheduled) {
+    _flushScheduled = true;
+    // Flush on next microtask -- all sync messages in the current event loop
+    // tick get batched into one GPU submit
+    Promise.resolve().then(flushQueue);
+  }
+}
+
+async function flushQueue() {
+  _flushScheduled = false;
+  const batch = _queue;
+  _queue = [];
+  if (batch.length === 0) return;
+
+  // Phase 1: Warp all inputs (these need separate submits because they use textures)
+  for (const entry of batch) {
+    if (entry.warp) entry.warp();
+  }
+
+  // Phase 2: Encode ALL model inferences into ONE encoder
+  const enc = device.createCommandEncoder();
+  for (const entry of batch) {
+    entry.runner.encodeInto(enc);
+  }
+  device.queue.submit([enc.finish()]);
+
+  // Phase 3: Read ALL outputs in parallel, then post results
+  await Promise.all(batch.map(async (entry) => {
+    try {
+      const outputs = await entry.runner.readOutputs();
+      entry.respond(outputs);
+    } catch (err) {
+      self.postMessage({ type: 'error', reqId: entry.reqId, message: err.message });
+    }
+  }));
+}
 
 self.onmessage = async (e) => {
   const { type, reqId } = e.data;
@@ -270,110 +313,110 @@ self.onmessage = async (e) => {
   }
 
   if (type === 'palmDetect') {
-    try {
-      const { bitmap } = e.data;
-      const { affine, letterbox } = letterboxAffine(PALM_SIZE, bitmap.width, bitmap.height);
-      dispatchWarp('palm', bitmap, affine);
-      bitmap.close();
-      const outputs = await palmRunner.runCompiled();
-      let regressors, scores;
-      for (const [, data] of Object.entries(outputs)) {
-        if (data.length > 2016) regressors = data;
-        else if (data.length === 2016) scores = data;
-      }
-      let detections = decodeDetections(regressors, scores, palmAnchors);
-      detections = weightedNMS(detections);
-      self.postMessage({ type: 'palmDetections', reqId, detections, letterbox });
-    } catch (err) {
-      self.postMessage({ type: 'error', reqId, message: err.message });
-    }
+    const { bitmap } = e.data;
+    const { affine, letterbox } = letterboxAffine(PALM_SIZE, bitmap.width, bitmap.height);
+    enqueue({
+      reqId,
+      runner: palmRunner,
+      warp: () => { dispatchWarp('palm', bitmap, affine); bitmap.close(); },
+      respond: (outputs) => {
+        let regressors, scores;
+        for (const [, data] of Object.entries(outputs)) {
+          if (data.length > 2016) regressors = data;
+          else if (data.length === 2016) scores = data;
+        }
+        let detections = decodeDetections(regressors, scores, palmAnchors);
+        detections = weightedNMS(detections);
+        self.postMessage({ type: 'palmDetections', reqId, detections, letterbox });
+      },
+    });
     return;
   }
 
   if (type === 'handLandmark') {
-    try {
-      const { bitmap, rect, vw, vh, slot = 0 } = e.data;
-      const inv = computeAffineParams(rect, HAND_SIZE);
-      if (!inv) { bitmap.close(); self.postMessage({ type: 'handResult', reqId, handFlag: 0 }); return; }
-      const warpName = slot === 0 ? 'hand0' : 'hand1';
-      dispatchWarp(warpName, bitmap, inv);
-      bitmap.close();
-      const outputs = await handRunners[slot].runCompiled();
-      const rawLM = handOutputNames.landmarks ? outputs[handOutputNames.landmarks] : null;
-      const handFlag = handOutputNames.handFlag ? outputs[handOutputNames.handFlag][0] : 0;
-      const handednessRaw = handOutputNames.handedness ? outputs[handOutputNames.handedness][0] : 0.5;
-      let projected = null;
-      if (rawLM && rawLM.length === 63) {
-        projected = new Float32Array(63);
-        for (let i = 0; i < 21; i++) {
-          projected[i*3]   = (inv.a * rawLM[i*3] + inv.b * rawLM[i*3+1] + inv.c) / vw;
-          projected[i*3+1] = (inv.d * rawLM[i*3] + inv.e * rawLM[i*3+1] + inv.f) / vh;
-          projected[i*3+2] = rawLM[i*3+2] / HAND_SIZE;
+    const { bitmap, rect, vw, vh, slot = 0 } = e.data;
+    const inv = computeAffineParams(rect, HAND_SIZE);
+    if (!inv) { bitmap.close(); self.postMessage({ type: 'handResult', reqId, handFlag: 0 }); return; }
+    const warpName = slot === 0 ? 'hand0' : 'hand1';
+    enqueue({
+      reqId,
+      runner: handRunners[slot],
+      warp: () => { dispatchWarp(warpName, bitmap, inv); bitmap.close(); },
+      respond: (outputs) => {
+        const rawLM = handOutputNames.landmarks ? outputs[handOutputNames.landmarks] : null;
+        const handFlag = handOutputNames.handFlag ? outputs[handOutputNames.handFlag][0] : 0;
+        const handednessRaw = handOutputNames.handedness ? outputs[handOutputNames.handedness][0] : 0.5;
+        let projected = null;
+        if (rawLM && rawLM.length === 63) {
+          projected = new Float32Array(63);
+          for (let i = 0; i < 21; i++) {
+            projected[i*3]   = (inv.a * rawLM[i*3] + inv.b * rawLM[i*3+1] + inv.c) / vw;
+            projected[i*3+1] = (inv.d * rawLM[i*3] + inv.e * rawLM[i*3+1] + inv.f) / vh;
+            projected[i*3+2] = rawLM[i*3+2] / HAND_SIZE;
+          }
         }
-      }
-      self.postMessage({
-        type: 'handResult', reqId, handFlag,
-        handedness: handednessRaw > 0.5 ? 'Right' : 'Left',
-        landmarks: projected?.buffer || null,
-      }, projected ? [projected.buffer] : []);
-    } catch (err) {
-      self.postMessage({ type: 'error', reqId, message: err.message });
-    }
+        self.postMessage({
+          type: 'handResult', reqId, handFlag,
+          handedness: handednessRaw > 0.5 ? 'Right' : 'Left',
+          landmarks: projected?.buffer || null,
+        }, projected ? [projected.buffer] : []);
+      },
+    });
     return;
   }
 
   if (type === 'faceDetect') {
-    try {
-      const { bitmap } = e.data;
-      const { affine, letterbox } = letterboxAffine(FACE_DET_SIZE, bitmap.width, bitmap.height);
-      dispatchWarp('faceDet', bitmap, affine);
-      bitmap.close();
-      const outputs = await faceDetRunner.runCompiled();
-      let regressors, scores;
-      for (const [, data] of Object.entries(outputs)) {
-        if (data.length > 896) regressors = data;
-        else if (data.length === 896) scores = data;
-      }
-      let detections = decodeFaceDetections(regressors, scores, faceAnchors);
-      detections = faceNMS(detections);
-      self.postMessage({ type: 'faceDetections', reqId, detections, letterbox });
-    } catch (err) {
-      self.postMessage({ type: 'error', reqId, message: err.message });
-    }
+    const { bitmap } = e.data;
+    const { affine, letterbox } = letterboxAffine(FACE_DET_SIZE, bitmap.width, bitmap.height);
+    enqueue({
+      reqId,
+      runner: faceDetRunner,
+      warp: () => { dispatchWarp('faceDet', bitmap, affine); bitmap.close(); },
+      respond: (outputs) => {
+        let regressors, scores;
+        for (const [, data] of Object.entries(outputs)) {
+          if (data.length > 896) regressors = data;
+          else if (data.length === 896) scores = data;
+        }
+        let detections = decodeFaceDetections(regressors, scores, faceAnchors);
+        detections = faceNMS(detections);
+        self.postMessage({ type: 'faceDetections', reqId, detections, letterbox });
+      },
+    });
     return;
   }
 
   if (type === 'faceLandmark') {
-    try {
-      const { bitmap, rect, vw, vh } = e.data;
-      const inv = computeAffineParams(rect, FACE_LM_SIZE);
-      if (!inv) { bitmap.close(); self.postMessage({ type: 'faceResult', reqId, faceFlag: 0 }); return; }
-      dispatchWarp('faceLm', bitmap, inv);
-      bitmap.close();
-      const outputs = await faceLmRunner.runCompiled();
-      const rawLM = faceLmOutputNames.landmarks ? outputs[faceLmOutputNames.landmarks] : null;
-      const faceFlag = faceLmOutputNames.faceFlag ? outputs[faceLmOutputNames.faceFlag][0] : 0;
-      let projected = null;
-      if (rawLM && rawLM.length === NUM_FACE_LM * 3) {
-        projected = new Float32Array(NUM_FACE_LM * 3);
-        for (let i = 0; i < NUM_FACE_LM; i++) {
-          projected[i*3]   = (inv.a * rawLM[i*3] + inv.b * rawLM[i*3+1] + inv.c) / vw;
-          projected[i*3+1] = (inv.d * rawLM[i*3] + inv.e * rawLM[i*3+1] + inv.f) / vh;
-          projected[i*3+2] = rawLM[i*3+2] / FACE_LM_SIZE;
+    const { bitmap, rect, vw, vh } = e.data;
+    const inv = computeAffineParams(rect, FACE_LM_SIZE);
+    if (!inv) { bitmap.close(); self.postMessage({ type: 'faceResult', reqId, faceFlag: 0 }); return; }
+    enqueue({
+      reqId,
+      runner: faceLmRunner,
+      warp: () => { dispatchWarp('faceLm', bitmap, inv); bitmap.close(); },
+      respond: (outputs) => {
+        const rawLM = faceLmOutputNames.landmarks ? outputs[faceLmOutputNames.landmarks] : null;
+        const faceFlag = faceLmOutputNames.faceFlag ? outputs[faceLmOutputNames.faceFlag][0] : 0;
+        let projected = null;
+        if (rawLM && rawLM.length === NUM_FACE_LM * 3) {
+          projected = new Float32Array(NUM_FACE_LM * 3);
+          for (let i = 0; i < NUM_FACE_LM; i++) {
+            projected[i*3]   = (inv.a * rawLM[i*3] + inv.b * rawLM[i*3+1] + inv.c) / vw;
+            projected[i*3+1] = (inv.d * rawLM[i*3] + inv.e * rawLM[i*3+1] + inv.f) / vh;
+            projected[i*3+2] = rawLM[i*3+2] / FACE_LM_SIZE;
+          }
         }
-      }
-      const rawCopy = rawLM ? new Float32Array(rawLM).buffer : null;
-      const transfers = [];
-      if (projected) transfers.push(projected.buffer);
-      if (rawCopy) transfers.push(rawCopy);
-      self.postMessage({
-        type: 'faceResult', reqId, faceFlag,
-        landmarks: projected?.buffer || null,
-        rawLandmarks: rawCopy, modelSize: FACE_LM_SIZE,
-      }, transfers);
-    } catch (err) {
-      self.postMessage({ type: 'error', reqId, message: err.message });
-    }
+        const rawCopy = rawLM ? new Float32Array(rawLM).buffer : null;
+        const transfers = [];
+        if (projected) transfers.push(projected.buffer);
+        if (rawCopy) transfers.push(rawCopy);
+        self.postMessage({
+          type: 'faceResult', reqId, faceFlag,
+          landmarks: projected?.buffer || null,
+          rawLandmarks: rawCopy, modelSize: FACE_LM_SIZE,
+        }, transfers);
+      },
+    });
     return;
   }
 };
