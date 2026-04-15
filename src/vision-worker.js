@@ -280,36 +280,21 @@ async function flushQueue() {
   _queue = [];
   if (batch.length === 0) return;
 
-  // ONE encoder for everything: warps + inference + readback copies
-  const enc = device.createCommandEncoder();
-
-  // Phase 1: Upload bitmaps as shared textures, encode warps
-  // Group by bitmap to share texture uploads where possible
-  const texturesToDestroy = [];
+  // Phase 1: Dispatch warps immediately (separate submits so GPU can start
+  // while we encode inference). This overlap is faster than batching everything.
   for (const entry of batch) {
     if (entry.bitmap && entry.warpName && entry.affine) {
-      const bmp = entry.bitmap;
-      const srcTexture = device.createTexture({
-        size: [bmp.width, bmp.height], format: 'rgba8unorm',
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-      });
-      device.queue.copyExternalImageToTexture({ source: bmp }, { texture: srcTexture }, [bmp.width, bmp.height]);
-      encodeWarp(enc, entry.warpName, srcTexture, bmp.width, bmp.height, entry.affine);
-      bmp.close();
-      texturesToDestroy.push(srcTexture);
+      dispatchWarp(entry.warpName, entry.bitmap, entry.affine);
+      entry.bitmap.close();
     }
   }
 
-  // Phase 2: Encode ALL model inferences into the SAME encoder
+  // Phase 2: Encode ALL model inferences into ONE encoder, ONE submit
+  const enc = device.createCommandEncoder();
   for (const entry of batch) {
     entry.runner.encodeInto(enc);
   }
-
-  // ONE submit for everything
   device.queue.submit([enc.finish()]);
-
-  // Clean up textures
-  for (const t of texturesToDestroy) t.destroy();
 
   // Phase 3: Read ALL outputs in parallel, then post results
   await Promise.all(batch.map(async (entry) => {
