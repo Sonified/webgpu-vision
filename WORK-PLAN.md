@@ -532,29 +532,41 @@ MediaPipe's browser SDK runs at roughly 30-40ms combined for hand + face in the 
 
 All four inference workers replaced with WGSL engine (palm-worker-wgsl.js, landmark-worker-wgsl.js, face-detection-worker-wgsl.js, face-landmark-worker-wgsl.js). Each worker has its own GPU device for true parallel execution. GPU sigmoid added (add.wgsl mode 4) to fix stale handFlag/handedness in compiled path. MediaPipe backend now fully torn down on switch to free GPU resources.
 
-**Live demo benchmarks (M1 Max, Chrome, 480x360 camera, both hands + face):**
+**Step 6b: Shader optimization + architecture tuning ✅ DONE (2026-04-14)**
 
-| | WGSL (live) | ORT-WebGPU (live, old) | MediaPipe (live) |
+Shader-level compute optimizations gave the biggest wins:
+- Workgroup shared memory for depthwise conv: 2x hand speedup (6.4ms -> 3.2ms headless)
+- Vec4 dot product for 1x1 pointwise: significant contribution to all models
+- Tried and rejected: inverted residual fusion (9x redundant compute), weight tiling (barrier cost > cache savings), bitmap cloning (sequential worse than parallel)
+
+Architecture: separate workers (5 GPU devices) with optimized shaders outperformed unified worker on all metrics. M1 GPU driver handles multi-device efficiently.
+
+**Live demo benchmarks (final, M1 Max, Chrome, 480x360, 1.0x sampling):**
+
+| | WGSL (live) | ORT-WebGPU (old) | MediaPipe | vs ORT | vs MediaPipe |
+|---|---|---|---|---|---|
+| Hand | **9.5ms** | 8.2ms | 29.3ms | 16% slower | **3.1x faster** |
+| Face LM | **13.2ms** | 13.0ms | 25.1ms | **parity** | **1.9x faster** |
+
+**Headless benchmarks (the compute ceiling):**
+
+| Model | WGSL compiled | ORT WASM | vs ORT |
 |---|---|---|---|
-| Hand | 10.6-17ms mean | 8.2ms mean | 29.3ms mean |
-| Face LM | 14.9-19.6ms mean | 13.0ms mean | 25.1ms mean |
+| Palm | 9.75ms | 27.83ms | **2.9x faster** |
+| Hand | 3.20ms | 17.45ms | **5.5x faster** |
+| Face det | 3.11ms | 3.10ms | parity |
+| Face LM | 7.02ms | 13.58ms | **1.9x faster** |
 
-WGSL beats MediaPipe by 1.7x (hand) and 1.3x (face). Slightly slower than ORT-WebGPU in live demo because ORT shared one GPU device across all workers via `ort.env.webgpu.device`, while our WGSL workers each create separate devices (GPU contention).
+Known issue: 1.3ms hand gap vs ORT in live demo is postMessage + createImageBitmap worker overhead. Invisible at 30fps. See OPTIMIZATION-LOG.md for full details.
 
-Headless benchmarks (single model, no contention) show the WGSL engine is 2-3x faster than ORT -- the gap is purely device contention in the multi-worker live setup.
+Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on iPhone.
 
-**Known issue: GPU device sharing**
-ORT's advantage was sharing one GPU device across workers. WebGPU doesn't allow passing a device across worker boundaries directly. Options for next session:
-- Create device on main thread, run inference on main thread (eliminates worker overhead but blocks main thread)
-- Use a single worker with all models but interleave hand/face on alternating frames (avoids serialization bottleneck of running all 4 every frame)
-- Investigate SharedArrayBuffer-based device sharing (experimental)
-
-**What's left for Step 7: Ship**
-- Resolve GPU device sharing for live perf parity with ORT
+**What's left for Step 7: Ship + Demo Polish**
 - Delete `vendor/onnxruntime-web/` (23MB -- still needed for blendshape worker)
 - Extract face blendshape model to WGSL (then vendor/ can be fully deleted)
-- Real camera frame correctness verification (current warp outputs NCHW -- verified working but edge cases untested)
 - Push to GitHub Pages
+- **Z-axis depth: stabilize hand size and convert z-depth into z-movement in video space**
+- Hand parallax compensation using true z-depth
 
 **New engine files added this session:**
 ```
