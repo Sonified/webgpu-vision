@@ -1553,11 +1553,16 @@ function _p1MaybeReport(now) {
   _p1HandCalls = 0;
 }
 
+let _lastHandFrameTime = 0;
 function processWebGPUHands() {
   if (!gpuReady || gpuHandBusy) return;
+  // Gate: only process once per video frame (prevent oversampling)
+  const now = performance.now();
+  if (now - _lastHandFrameTime < 16) return; // skip if <16ms since last call
+  _lastHandFrameTime = now;
   _p1HandCalls++;
   gpuHandBusy = true;
-  const t0 = performance.now();
+  const t0 = now;
   gpuHandTracker.processFrame(video).then(result => {
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
