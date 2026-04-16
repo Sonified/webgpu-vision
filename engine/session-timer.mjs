@@ -6,6 +6,8 @@
  *
  * Files in ~/.session-timer/:
  *   session-start   — ISO timestamp of current session
+ *   pause-start     — ISO timestamp of when pause began (only exists while paused)
+ *   paused-ms       — accumulated milliseconds spent paused this session
  *   ieee-hours      — JSON: { "date": "2026-04-13", "hours": 3.5 }
  *   ieee-hours-log  — append-only daily log (date,hours per line)
  *
@@ -59,10 +61,12 @@ export function ieeeGate(ieeeJson) {
 }
 
 /**
- * @param {string} startIso - contents of ~/.spellaria-session-start
- * @param {string|null} ieeeJson - contents of ~/.ieee-hours (optional)
+ * @param {string} startIso - contents of session-start
+ * @param {string|null} ieeeJson - contents of ieee-hours
+ * @param {number} pausedMs - accumulated paused milliseconds (default 0)
+ * @param {string|null} pauseStartIso - if currently paused, when the pause began
  */
-export function sessionStatus(startIso, ieeeJson) {
+export function sessionStatus(startIso, ieeeJson, pausedMs = 0, pauseStartIso = null) {
   // Check IEEE gate first
   const ieee = ieeeGate(ieeeJson);
 
@@ -101,11 +105,21 @@ export function sessionStatus(startIso, ieeeJson) {
     };
   }
 
-  const elapsed = now.getTime() - start.getTime();
+  // If currently paused, add the current pause duration to total paused
+  let totalPaused = pausedMs;
+  const paused = !!pauseStartIso;
+  if (paused) {
+    const pauseStart = new Date(pauseStartIso.trim());
+    if (!isNaN(pauseStart)) totalPaused += now.getTime() - pauseStart.getTime();
+  }
+
+  const elapsed = now.getTime() - start.getTime() - totalPaused;
   const remaining = Math.max(0, BUDGET_MS - elapsed);
 
   let banner;
-  if (remaining === 0) {
+  if (paused) {
+    banner = `Spellaria session PAUSED. ${fmt(elapsed)} elapsed, ${fmt(remaining)} remaining.`;
+  } else if (remaining === 0) {
     banner = `The daily allotted time for the Spellaria project has been exceeded. No additional work may be performed until the daily reset (5 AM).`;
   } else if (!ieee.met) {
     if (ieee.hours > 0) {
@@ -123,6 +137,7 @@ export function sessionStatus(startIso, ieeeJson) {
     remaining: fmt(remaining),
     overBudget: remaining === 0,
     expired: false,
+    paused,
     ieeeGate: ieee,
     banner,
   };
@@ -140,6 +155,38 @@ export async function logBanner(logFn) {
   } catch {}
 }
 
+/** Pause the session timer. Writes pause-start timestamp. */
+export async function pause() {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const dir = os.homedir() + '/.session-timer';
+  if (fs.existsSync(dir + '/pause-start')) {
+    console.log('\x1b[33mAlready paused.\x1b[0m');
+    return;
+  }
+  fs.writeFileSync(dir + '/pause-start', new Date().toISOString());
+  console.log('\x1b[33mSession paused.\x1b[0m');
+  await printBanner();
+}
+
+/** Unpause the session timer. Accumulates paused duration. */
+export async function unpause() {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const dir = os.homedir() + '/.session-timer';
+  if (!fs.existsSync(dir + '/pause-start')) {
+    console.log('\x1b[33mNot paused.\x1b[0m');
+    return;
+  }
+  const pauseStart = new Date(fs.readFileSync(dir + '/pause-start', 'utf8').trim());
+  const pauseDuration = Date.now() - pauseStart.getTime();
+  const existing = fs.existsSync(dir + '/paused-ms') ? parseInt(fs.readFileSync(dir + '/paused-ms', 'utf8')) || 0 : 0;
+  fs.writeFileSync(dir + '/paused-ms', String(existing + pauseDuration));
+  fs.unlinkSync(dir + '/pause-start');
+  console.log(`\x1b[32mSession resumed. (Paused for ${Math.floor(pauseDuration / 60000)}m ${Math.floor((pauseDuration % 60000) / 1000)}s)\x1b[0m`);
+  await printBanner();
+}
+
 /** Node: reads both files from ~ and prints the banner to stdout. Returns status object. */
 export async function printBanner() {
   try {
@@ -148,7 +195,9 @@ export async function printBanner() {
     const dir = os.homedir() + '/.session-timer';
     const start = fs.existsSync(dir + '/session-start') ? fs.readFileSync(dir + '/session-start', 'utf8') : null;
     const ieee = fs.existsSync(dir + '/ieee-hours') ? fs.readFileSync(dir + '/ieee-hours', 'utf8') : null;
-    const s = sessionStatus(start, ieee);
+    const pausedMs = fs.existsSync(dir + '/paused-ms') ? parseInt(fs.readFileSync(dir + '/paused-ms', 'utf8')) || 0 : 0;
+    const pauseStart = fs.existsSync(dir + '/pause-start') ? fs.readFileSync(dir + '/pause-start', 'utf8') : null;
+    const s = sessionStatus(start, ieee, pausedMs, pauseStart);
     if (s) console.log(`\x1b[36m${s.banner}\x1b[0m`);
     return s;
   } catch { return null; }

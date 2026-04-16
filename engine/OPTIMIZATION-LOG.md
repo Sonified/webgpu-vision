@@ -238,12 +238,37 @@ The key was NOT architecture (unified vs separate workers) -- it was **shader-le
 - **Result:** Hand oversampling dropped from 2.0x to 1.0x. Freed GPU cycles. Revealed that the 8.2ms "parity" number was inflated by double processing.
 - **Honest numbers:** Hand 9.5ms, Face 13.2ms with clean 1.0x sampling.
 
-### Known issue: 1.3ms hand gap vs ORT-WebGPU
-- **WGSL hand: 9.5ms** vs **ORT hand: 8.2ms** (16% slower)
-- **WGSL face: 13.2ms** vs **ORT face: 13.0ms** (parity)
-- The gap is postMessage + createImageBitmap + structured clone overhead. ORT avoids this by running inference inside WASM on the same thread as GPU commands. We can't eliminate these browser API costs without moving inference off workers -- which would block the main thread.
-- Both are well under the 33ms frame budget at 30fps. The 1.3ms is invisible to the user.
+### 15. Cached warp texture + bind group (SHIPPED -- 5% hand improvement)
+- **What:** All 4 WGSL workers were calling `device.createTexture()` + `device.createBindGroup()` + `srcTexture.destroy()` on every frame for the warp/letterbox preprocessing step. Video dimensions never change mid-session, so these GPU resources are identical every frame. Cached them: create once on first frame, reuse thereafter, only recreate if video resolution changes. Also pre-allocated `Float32Array` for uniform writes (landmark workers).
+- **Files changed:** `palm-worker-wgsl.js`, `landmark-worker-wgsl.js`, `face-detection-worker-wgsl.js`, `face-landmark-worker-wgsl.js`
+- **Result (live demo, 2 hands + face, M1 Max):**
+  - Hand: **9.5ms -> 9.0ms** (5% faster, best batch 8.6ms)
+  - Face: **13.2ms -> 13.0ms** (exact ORT parity)
+- **Why it helped:** `createTexture()` is a real GPU driver allocation (not just a JS object). It asks the GPU to carve out VRAM, set up memory mapping, configure format/usage flags. `createBindGroup()` triggers driver-side validation of buffer/texture compatibility against the pipeline layout. Doing both 5x per frame (one per worker) was pure overhead. Caching eliminates ~10 GPU driver calls per frame.
+- **Cost:** Textures persist in VRAM instead of being freed each frame. For 480x360 RGBA8 video, that's ~675KB per worker x 5 = ~3.4MB total. Negligible.
+
+### Known issue: 0.8ms hand gap vs ORT-WebGPU
+- **WGSL hand: 9.0ms** vs **ORT hand: 8.2ms** (10% slower)
+- **WGSL face: 13.0ms** vs **ORT face: 13.0ms** (**PARITY**)
+- The remaining gap is postMessage + createImageBitmap overhead. ORT avoids this by running inference inside WASM on the same thread as GPU commands.
+- Both are well under the 33ms frame budget at 30fps. The 0.8ms is invisible to the user.
 - Potential future fix: WebGPU may eventually support transferring GPU textures across workers, eliminating the bitmap decode step entirely.
+
+### 14. Output channel tiling for 1x1 pointwise (NO IMPROVEMENT on M1)
+- **What:** Each thread computes multiple output channels instead of 1, sharing the input vector loads across channels. Tested 2-OC (2 channels per thread) and 4-OC (4 channels per thread). Dispatch z-dimension reduced from `outC` to `ceil(outC/N)`.
+- **Hypothesis:** Input activations loaded once per thread, reused across N output channels, cutting input bandwidth by Nx.
+- **Benchmark methodology note:** Initial results (single batch, 5 warmup) showed 22-30% regression. Proper benchmarking (5 batches of 50, 20 warmup iterations, median) revealed the initial results were polluted by GPU warmup variance. Real numbers below.
+- **Results (proper benchmark, isolated browser per model, median of 5x50):**
+
+  | Variant | Hand LM | Palm Det |
+  |---|---|---|
+  | Baseline (1 OC) | **3.33ms** | **9.81ms** |
+  | 2-OC tiling | **3.83ms** (+15%) | **9.57ms** (-2.4%) |
+  | 4-OC tiling | **3.54ms** (+6%) | not tested |
+
+- **Model-dependent:** 2-OC helps palm (smaller channels, max 256) but hurts hand (672-channel layers). The extra weight bandwidth for 672-channel 2nd output channel exceeds the input bandwidth savings. Palm's smaller channels keep the weight overhead manageable.
+- **Key insight:** OC tiling trades input bandwidth for weight bandwidth. On M1 with L2 cache, input reads are already cheap (cache hits). The trade only wins when channels are small enough that the extra weight reads don't dominate. For MobileNetV2's 672-channel layers, they do.
+- **Status:** Reverted. Single OC per thread is optimal for the hand model (our primary optimization target). The 2-OC approach would likely help on discrete GPUs (NVIDIA, AMD) where input reads are real cache misses, and should be retested on non-Apple hardware.
 
 ### What we learned
 - Architecture experiments (unified worker, batched submit, warp folding) gave ~10-20% improvements at best
@@ -251,3 +276,5 @@ The key was NOT architecture (unified vs separate workers) -- it was **shader-le
 - The GPU driver and L2 cache on M1 are smart enough that explicit data sharing (shared memory for weights, unified device) often hurts more than helps
 - The M1 handles 5 separate GPU devices efficiently -- the "waste" of separate devices is actually free parallelism
 - When in doubt, make the shader itself faster, not the orchestration around it
+- **M1 L2 cache defeats three separate tiling/sharing strategies:** weight tiling (#11), output channel tiling (#14), and the inverted residual fusion (#10). All three attempt to avoid reads that are already cheap. The pattern is consistent: on Apple Silicon with large unified-memory L2, the overhead of the sharing mechanism (barriers, registers, branches) exceeds the bandwidth savings. This may NOT hold on discrete GPUs (NVIDIA, AMD) where memory latency is higher and L2 is smaller -- these optimizations should be retested if targeting non-Apple hardware.
+- **Benchmark methodology matters enormously.** GPU pipelines need 15-20 warmup iterations (not 5) to stabilize. Single-batch measurements can vary 20%+ between runs. Always use multiple batches (5x50) and take the median. Always test in isolated browser instances (sequential model tests in the same browser cause resource contention). Initial "30% regression" from OC tiling was entirely warmup noise -- real difference was 6-15% depending on model.

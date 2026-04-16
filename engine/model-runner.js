@@ -354,6 +354,8 @@ export class ModelRunner {
         if (!tensors[inName]) throw new Error(`Conv node ${i}: missing input buffer '${inName}'`);
         if (!this.W[wName]) throw new Error(`Conv node ${i}: missing weight '${wName}'`);
 
+        const zDim = oC;
+
         dispatch(enc, this.P.conv2d, device.createBindGroup({
           layout: this.P.conv2d.getBindGroupLayout(0),
           entries: [
@@ -365,7 +367,7 @@ export class ModelRunner {
             { binding: 5, resource: { buffer: this.dummy } }, // no residual
             { binding: 6, resource: { buffer: outBuf } },
           ],
-        }), Math.ceil(oW / 8), Math.ceil(oH / 8), oC);
+        }), Math.ceil(oW / 8), Math.ceil(oH / 8), zDim);
         continue;
       }
 

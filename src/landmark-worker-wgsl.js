@@ -144,36 +144,47 @@ async function initGPU() {
   }
 }
 
-function dispatchWarp(bitmap, inv) {
-  const srcTexture = device.createTexture({
-    size: [bitmap.width, bitmap.height], format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-  device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: srcTexture }, [bitmap.width, bitmap.height]);
-  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([
-    inv.a, inv.b, inv.c, 0,
-    inv.d, inv.e, inv.f, 0,
-    bitmap.width, bitmap.height, 0, 0,
-  ]));
+// Cached warp GPU resources -- reused every frame (only recreated if video resolution changes)
+let cachedWarpTexture = null;
+let cachedWarpBindGroup = null;
+let cachedWarpSize = [0, 0];
+const warpUniforms = new Float32Array(12); // pre-allocated uniform scratch
 
-  const bindGroup = device.createBindGroup({
-    layout: warpPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: srcTexture.createView() },
-      { binding: 1, resource: gpuSampler },
-      { binding: 2, resource: { buffer: inputBuf } },
-      { binding: 3, resource: { buffer: uniformBuffer } },
-    ],
-  });
+function dispatchWarp(bitmap, inv) {
+  const w = bitmap.width, h = bitmap.height;
+
+  // Recreate texture + bind group only when dimensions change
+  if (w !== cachedWarpSize[0] || h !== cachedWarpSize[1]) {
+    if (cachedWarpTexture) cachedWarpTexture.destroy();
+    cachedWarpTexture = device.createTexture({
+      size: [w, h], format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    cachedWarpBindGroup = device.createBindGroup({
+      layout: warpPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: cachedWarpTexture.createView() },
+        { binding: 1, resource: gpuSampler },
+        { binding: 2, resource: { buffer: inputBuf } },
+        { binding: 3, resource: { buffer: uniformBuffer } },
+      ],
+    });
+    cachedWarpSize = [w, h];
+  }
+
+  device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: cachedWarpTexture }, [w, h]);
+  warpUniforms[0] = inv.a; warpUniforms[1] = inv.b; warpUniforms[2] = inv.c;
+  warpUniforms[4] = inv.d; warpUniforms[5] = inv.e; warpUniforms[6] = inv.f;
+  warpUniforms[8] = w; warpUniforms[9] = h;
+  device.queue.writeBuffer(uniformBuffer, 0, warpUniforms);
 
   const enc = device.createCommandEncoder();
   const pass = enc.beginComputePass();
   pass.setPipeline(warpPipeline);
-  pass.setBindGroup(0, bindGroup);
+  pass.setBindGroup(0, cachedWarpBindGroup);
   pass.dispatchWorkgroups(Math.ceil(S / 16), Math.ceil(S / 16));
   pass.end();
   device.queue.submit([enc.finish()]);
-  srcTexture.destroy();
 }
 
 self.onmessage = async (e) => {

@@ -118,44 +118,54 @@ async function initGPU() {
   return graph;
 }
 
+// Cached letterbox GPU resources -- reused every frame (only recreated if video resolution changes)
+let cachedLBTexture = null;
+let cachedLBBindGroup = null;
+let cachedLBSize = [0, 0];
+let cachedLetterbox = null;
+
 function gpuLetterbox(bitmap) {
   const srcW = bitmap.width, srcH = bitmap.height;
   const scale = PALM_SIZE / Math.max(srcW, srcH);
   const dstW = Math.round(srcW * scale), dstH = Math.round(srcH * scale);
   const offsetX = (PALM_SIZE - dstW) / 2, offsetY = (PALM_SIZE - dstH) / 2;
 
-  const srcTexture = device.createTexture({
-    size: [srcW, srcH], format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-  device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: srcTexture }, [srcW, srcH]);
-  device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([scale, offsetX, offsetY, srcW, srcH, 0, 0, 0]));
+  // Recreate texture + bind group only when dimensions change
+  if (srcW !== cachedLBSize[0] || srcH !== cachedLBSize[1]) {
+    if (cachedLBTexture) cachedLBTexture.destroy();
+    cachedLBTexture = device.createTexture({
+      size: [srcW, srcH], format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    cachedLBBindGroup = device.createBindGroup({
+      layout: letterboxPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: cachedLBTexture.createView() },
+        { binding: 1, resource: sampler },
+        { binding: 2, resource: { buffer: letterboxOutputBuf } },
+        { binding: 3, resource: { buffer: uniformBuffer } },
+      ],
+    });
+    cachedLBSize = [srcW, srcH];
+    cachedLetterbox = {
+      scaleX: dstW / PALM_SIZE, scaleY: dstH / PALM_SIZE,
+      offsetX: offsetX / PALM_SIZE, offsetY: offsetY / PALM_SIZE,
+    };
+    // Uniforms only change when dimensions change
+    device.queue.writeBuffer(uniformBuffer, 0, new Float32Array([scale, offsetX, offsetY, srcW, srcH, 0, 0, 0]));
+  }
 
-  const bindGroup = device.createBindGroup({
-    layout: letterboxPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: srcTexture.createView() },
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: { buffer: letterboxOutputBuf } },
-      { binding: 3, resource: { buffer: uniformBuffer } },
-    ],
-  });
+  device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: cachedLBTexture }, [srcW, srcH]);
 
   const enc = device.createCommandEncoder();
   const pass = enc.beginComputePass();
   pass.setPipeline(letterboxPipeline);
-  pass.setBindGroup(0, bindGroup);
+  pass.setBindGroup(0, cachedLBBindGroup);
   pass.dispatchWorkgroups(Math.ceil(PALM_SIZE / 16), Math.ceil(PALM_SIZE / 16));
   pass.end();
   device.queue.submit([enc.finish()]);
-  srcTexture.destroy();
 
-  return {
-    scaleX: dstW / PALM_SIZE,
-    scaleY: dstH / PALM_SIZE,
-    offsetX: offsetX / PALM_SIZE,
-    offsetY: offsetY / PALM_SIZE,
-  };
+  return cachedLetterbox;
 }
 
 self.onmessage = async (e) => {
