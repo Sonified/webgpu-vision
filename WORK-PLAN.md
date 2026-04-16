@@ -380,6 +380,10 @@ The 22x oversampling is the smoking gun: the video frame callback was accumulati
 
 Not reliably reproducible yet. Worth investigating next time it happens: check `document.visibilityState` at startup, whether any worker's first `postMessage` is hanging, and whether `requestVideoFrameCallback` has a warmup issue. The face worker's very first detection took an abnormally long time to complete (face-lm p95 was 106.7ms max in that recovery burst, vs typical 14-16ms), which suggests the stall is on the face pipeline side.
 
+### Known issue: face detection tracking preview not cleaned up on toggle off
+
+When the face detection model is toggled off in the ball-toss demo, the small tracking preview window in the corner (showing the detected face region) is not cleaned up -- it stays on screen even after face tracking stops. Demo-level issue in `demos/ball-toss/index.html`. Fix: when face tracking is disabled, clear the preview canvas and hide the overlay element.
+
 ### Mobile / phone support: WebGPU Vision not loading
 
 Current symptom: the demo loads on desktop Chrome but **fails to load on phone**. Root cause not yet diagnosed. Investigation steps:
