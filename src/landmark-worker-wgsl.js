@@ -177,14 +177,15 @@ function dispatchWarp(source, inv) {
   warpUniforms[4] = inv.d; warpUniforms[5] = inv.e; warpUniforms[6] = inv.f;
   warpUniforms[8] = w; warpUniforms[9] = h;
   device.queue.writeBuffer(uniformBuffer, 0, warpUniforms);
+}
 
-  const enc = device.createCommandEncoder();
+/** Encode warp dispatch into an external command encoder (no submit). */
+function encodeWarp(enc) {
   const pass = enc.beginComputePass();
   pass.setPipeline(warpPipeline);
   pass.setBindGroup(0, cachedWarpBindGroup);
   pass.dispatchWorkgroups(Math.ceil(S / 16), Math.ceil(S / 16));
   pass.end();
-  device.queue.submit([enc.finish()]);
 }
 
 self.onmessage = async (e) => {
@@ -212,12 +213,16 @@ self.onmessage = async (e) => {
         return;
       }
 
-      // GPU affine warp writes NCHW directly into the compiled input buffer
+      // Upload frame to GPU texture + write uniforms (queue commands, no submit yet)
       dispatchWarp(frame, inv);
       frame.close();
 
-      // Run compiled model
-      const outputs = await runner.runCompiled();
+      // Single encoder: warp dispatch + inference dispatches + readback copies
+      const enc = device.createCommandEncoder();
+      encodeWarp(enc);
+      runner.encodeInto(enc);
+      device.queue.submit([enc.finish()]);
+      const outputs = await runner.readOutputs();
 
       const rawLandmarks = outputNames.landmarks ? outputs[outputNames.landmarks] : null;
       const handFlag = outputNames.handFlag ? outputs[outputNames.handFlag][0] : 0;

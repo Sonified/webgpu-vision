@@ -166,14 +166,14 @@ function dispatchWarp(source, inv) {
   warpUniforms[4] = inv.d; warpUniforms[5] = inv.e; warpUniforms[6] = inv.f;
   warpUniforms[8] = w; warpUniforms[9] = h;
   device.queue.writeBuffer(uniformBuffer, 0, warpUniforms);
+}
 
-  const enc = device.createCommandEncoder();
+function encodeWarp(enc) {
   const pass = enc.beginComputePass();
   pass.setPipeline(warpPipeline);
   pass.setBindGroup(0, cachedWarpBindGroup);
   pass.dispatchWorkgroups(Math.ceil(S / 16), Math.ceil(S / 16));
   pass.end();
-  device.queue.submit([enc.finish()]);
 }
 
 self.onmessage = async (e) => {
@@ -204,7 +204,12 @@ self.onmessage = async (e) => {
       dispatchWarp(frame, inv);
       frame.close();
 
-      const outputs = await runner.runCompiled();
+      // Single encoder: warp + inference + readback in one submit
+      const enc = device.createCommandEncoder();
+      encodeWarp(enc);
+      runner.encodeInto(enc);
+      device.queue.submit([enc.finish()]);
+      const outputs = await runner.readOutputs();
 
       const rawLandmarks = outputNames.landmarks ? outputs[outputNames.landmarks] : null;
       const faceFlag = outputNames.faceFlag ? outputs[outputNames.faceFlag][0] : 0;

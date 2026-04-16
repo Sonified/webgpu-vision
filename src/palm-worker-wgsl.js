@@ -157,15 +157,15 @@ function gpuLetterbox(source) {
 
   device.queue.copyExternalImageToTexture({ source }, { texture: cachedLBTexture }, [srcW, srcH]);
 
-  const enc = device.createCommandEncoder();
+  return cachedLetterbox;
+}
+
+function encodeLetterbox(enc) {
   const pass = enc.beginComputePass();
   pass.setPipeline(letterboxPipeline);
   pass.setBindGroup(0, cachedLBBindGroup);
   pass.dispatchWorkgroups(Math.ceil(PALM_SIZE / 16), Math.ceil(PALM_SIZE / 16));
   pass.end();
-  device.queue.submit([enc.finish()]);
-
-  return cachedLetterbox;
 }
 
 self.onmessage = async (e) => {
@@ -187,12 +187,16 @@ self.onmessage = async (e) => {
     try {
       const { frame } = e.data;
 
-      // GPU letterbox writes NCHW directly into the compiled input buffer
+      // GPU letterbox: upload frame + write uniforms
       const letterbox = gpuLetterbox(frame);
       frame.close();
 
-      // Run compiled model (zero JS overhead)
-      const outputs = await runner.runCompiled();
+      // Single encoder: letterbox + inference + readback in one submit
+      const enc = device.createCommandEncoder();
+      encodeLetterbox(enc);
+      runner.encodeInto(enc);
+      device.queue.submit([enc.finish()]);
+      const outputs = await runner.readOutputs();
 
       // Decode outputs -- find regressors (dim 18) and scores (dim 1)
       let regressors, scores;
