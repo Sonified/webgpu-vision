@@ -157,6 +157,7 @@ export class HandTracker {
     this.running = false;
     this.palmDetecting = false;   // is palm worker currently busy?
     this.pendingDetections = null; // stashed results from last palm detect
+    this.dupeFrames = 0;          // consecutive frames both slots track the same hand
   }
 
   async init(onStatus) {
@@ -259,6 +260,51 @@ export class HandTracker {
         [this.slots[0].rect, this.slots[1].rect] = [this.slots[1].rect, this.slots[0].rect];
         [this.slots[0].landmarks, this.slots[1].landmarks] = [this.slots[1].landmarks, this.slots[0].landmarks];
         [results[0], results[1]] = [results[1], results[0]];
+      }
+
+      // Detect double-mapped hands: both slots locked onto the same physical hand.
+      // Don't kill either slot (could be prayer hands). Instead, run palm detection
+      // in the background looking for the separated hand. When a new detection appears
+      // that doesn't overlap either current slot, reassign the duplicate slot to it.
+      if (this.slots[0].active && this.slots[1].active &&
+          results[0] && results[1] &&
+          results[0].handedness === results[1].handedness) {
+        const r0 = this.slots[0].rect, r1 = this.slots[1].rect;
+        const dx = r0.cx - r1.cx, dy = r0.cy - r1.cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const overlap = dist < Math.max(r0.w, r1.w) * 0.6;
+        if (overlap) {
+          this.dupeFrames++;
+          // After 3 frames of confirmed duplicate, start background palm detection
+          // to look for the separated hand (even though both slots are "active")
+          if (this.dupeFrames >= 3 && !this.palmDetecting) {
+            this.palmDetecting = true;
+            const frame = new VideoFrame(video);
+            this.palmWorker.detect(frame).then(result => {
+              this.palmDetecting = false;
+              if (!result.detections.length) return;
+              // Find a detection that doesn't overlap either current slot
+              for (const det of result.detections) {
+                const detX = det.cx * vw, detY = det.cy * vh;
+                const d0 = Math.sqrt((detX - this.slots[0].rect.cx) ** 2 + (detY - this.slots[0].rect.cy) ** 2);
+                const d1 = Math.sqrt((detX - this.slots[1].rect.cx) ** 2 + (detY - this.slots[1].rect.cy) ** 2);
+                const minSep = Math.max(this.slots[0].rect.w, this.slots[1].rect.w) * 0.5;
+                if (d0 > minSep || d1 > minSep) {
+                  // Found a separated hand -- reassign the duplicate slot (slot 1)
+                  const rect = detectionToRect(det, vw, vh);
+                  this.slots[1].rect = rect;
+                  logSlot(`[dedup] found separated hand, reassigning slot 1 cx=${rect.cx.toFixed(0)} cy=${rect.cy.toFixed(0)}`);
+                  this.dupeFrames = 0;
+                  break;
+                }
+              }
+            }).catch(() => { this.palmDetecting = false; });
+          }
+        } else {
+          this.dupeFrames = 0;
+        }
+      } else {
+        this.dupeFrames = 0;
       }
 
       logLandmark(`[tracking] slots: ${this.slots.map(s => s.active ? (s === this.slots[0] ? 'L' : 'R') : '_').join(',')}`);
