@@ -74,6 +74,11 @@
     <option value="void">Void</option>
     <option value="xray">X-Ray</option>
   </select>
+  <span class="sep" style="color:#888;">Ripples</span>
+  <select id="ripple-toggle">
+    <option value="off">Off</option>
+    <option value="on">On</option>
+  </select>
   <span class="sep" style="color:#888;">Particles</span>
   <select id="particle-mode">
     <option value="none">None</option>
@@ -155,6 +160,9 @@ const backendSelect = document.getElementById('backend-select');
 document.getElementById('hand-style').value = currentStyle;
 backendSelect.value = activeBackend;
 document.getElementById('particle-mode').value = savedPrefs.particles || 'none';
+let ripplesOn = (savedPrefs.ripples || 'off') === 'on';
+document.getElementById('ripple-toggle').value = savedPrefs.ripples || 'off';
+document.getElementById('ripple-toggle').addEventListener('change', (e) => { ripplesOn = e.target.value === 'on'; savePref('ripples', e.target.value); });
 
 // ---- Three.js setup ----
 const scene = new THREE.Scene();
@@ -586,7 +594,7 @@ function updateParticleColors() {
       uPrevState: { value: null },
       uResolution: { value: new THREE.Vector2(WAVE_GRID, WAVE_GRID) },
       uWaveSpeed: { value: 0.45 },
-      uDamping: { value: 0.992 },
+      uDamping: { value: 0.988 },
       uSources: { value: Array.from({ length: 10 }, () => new THREE.Vector3(-99, -99, 0)) },
       uNumSources: { value: 0 },
       uSourceRadius: { value: 0.012 },
@@ -615,9 +623,9 @@ function updateParticleColors() {
         float d = texture2D(uWaveState, vUv + vec2(0.0, -texel.y)).r;
 
         vec2 gradient = vec2(r - l, u - d);
-        float steepness = length(gradient) * 20.0;
-        float highlight = smoothstep(0.15, 0.5, steepness);
-        vec3 color = mix(uColor, vec3(1.0), highlight * 0.5);
+        float steepness = length(gradient) * 30.0;
+        float highlight = smoothstep(0.1, 0.4, steepness);
+        vec3 color = mix(uColor, vec3(1.0), highlight * 0.6);
         float alpha = min(steepness * uOpacity, 1.0);
 
         gl_FragColor = vec4(color, alpha);
@@ -626,7 +634,7 @@ function updateParticleColors() {
     uniforms: {
       uWaveState: { value: null },
       uColor: { value: new THREE.Color(STYLES.energy.emissive) },
-      uOpacity: { value: 0.5 },
+      uOpacity: { value: 0.7 },
       uResolution: { value: new THREE.Vector2(WAVE_GRID, WAVE_GRID) },
     },
     transparent: true,
@@ -663,7 +671,7 @@ function getWaveTipUVs(filteredHands) {
 
 const prevWaveUVs = [null, null];
 
-const BASE_WAVE_SPEED = 0.3;
+const BASE_WAVE_SPEED = 0.25;
 
 function stepWaveEquation(filteredHands) {
   const curUVs = getWaveTipUVs(filteredHands);
@@ -686,10 +694,10 @@ function stepWaveEquation(filteredHands) {
         const uvy = startUV.y + (cur.y - startUV.y) * t;
 
         const prev = prevWaveTips[h][fi];
-        let force = 0.003 / substeps;
+        let force = 0.001 / substeps;
         if (prev) {
           const speed = Math.hypot(uvx - prev.x, uvy - prev.y);
-          force += Math.min(speed * 4.0, 0.12) / substeps;
+          force += Math.min(speed * 2.0, 0.06) / substeps;
         }
         sources[count].set(uvx, uvy, force);
         prevWaveTips[h][fi] = { x: uvx, y: uvy };
@@ -1069,13 +1077,15 @@ function animate() {
   updatePalmWeb(palmWebs[1], interp1);
 
   // Wave equation: fingertips radiate ripples across background
-  stepWaveEquation([interp0, interp1]);
+  waveDisplayPlane.visible = ripplesOn;
+  if (ripplesOn) stepWaveEquation([interp0, interp1]);
 
   // Hand meshes
   updateHand(handGroups[0], interp0);
   updateHand(handGroups[1], interp1);
 
   const pulse = 0.6 + 0.4 * Math.sin(now * 0.003);
+  waveDisplayMaterial.uniforms.uOpacity.value = 0.7 + 0.4 * pulse;
   for (const g of handGroups) {
     g.userData.jointMat.emissiveIntensity = 0.8 * pulse;
     g.userData.tipMat.emissiveIntensity = 1.2 * pulse;
