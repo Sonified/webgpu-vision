@@ -6,3 +6,17 @@ CLAUDE.md
 benchmark/
 ar/
 .session-timer
+RESEARCH-*.md
+
+# RTMPose exploration models (not used by engine, ~232MB)
+models/rtmpose*
+models/20230831/
+
+# Sparse model binary (10.1MB, downloaded on demand)
+models/hand_landmark_sparse*
+
+# ORT vendor copies (used by test-rtmpose.html, not needed in engine)
+vendor/ort-wasm-simd-threaded.jsep.*
+
+# QR codes for mobile testing
+qr-*.png

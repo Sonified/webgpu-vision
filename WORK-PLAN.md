@@ -617,7 +617,8 @@ Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on
 **What's left for Step 7: Ship + Demo Polish**
 - **Hand identity tracking** (DONE 2026-04-17): pipeline now uses palm-centroid identity tracking, duplicate detection with tunable slider in the drawer, and palm re-anchor while hands overlap. At parity with or better than MediaPipe in most cases. Full overlap still imperfect -- see "hand identity can swap" known issue.
 - **SpellARia Motion Signature Recorder (CRITICAL PATH)**: build the data-collection tool NOW, start collecting a labeled dataset of reversals vs terminations. This is the path to the prediction classifier that eliminates perceived latency. Data collection is the long pole -- wall-clock time spent physically performing motions. See "CRITICAL PATH: SpellARia Motion Signature Recorder" section below.
-- **RTMPose hand-only evaluation**: swap in RTMPose's hand-only ONNX and A/B it vs MediaPipe via ORT Web. If SimCC-based keypoint localization is meaningfully more accurate on extreme poses (needed for Spellaria sign-language gestures), plumb through our WGSL engine. Can run in parallel with recorder work. See "Next session: try the RTMPose hand-only model" section below.
+- **RTMPose hand-only evaluation** (DONE 2026-04-20): RTMPose ruled out (too big, too slow). Discovered `hand_landmark_sparse` (10.1MB, same MediaPipe family, vastly superior pinch tracking). See "RTMPose hand-only evaluation" section below.
+- **Port hand_landmark_sparse to WGSL engine** (NEW, HIGH PRIORITY): same architecture as hand_landmark_full, just wider layers. Dump ONNX graph, extract weights, compile through ModelRunner. Should need zero new ops. Estimated ~5-8ms/hand vs current ~3-4ms/hand. Batch dimension enables both-hands-in-one-call. See "Next: port hand_landmark_sparse to WGSL engine" section below.
 - **Z-axis depth via landmark spread**: derive depth from pixel distance between wrist and middle-finger MCP. See "Z-depth via landmark spread" section below for the full design.
 - Hand parallax compensation using the derived z-depth.
 - **Output adapter layer + OSC pipeline**: pluggable outputs (OSC, MIDI, WebSocket, BroadcastChannel) so hand/gesture events can drive other software and devices. See "Future: output adapters + OSC pipeline" section below.
@@ -656,55 +657,71 @@ test-face-lm.html    — Face landmark test (ModelRunner + compiled)
 
 ### Future: model upgrades once the engine exists
 
-The custom WGSL engine doesn't care which model's weights it runs. Once it works with our current MediaPipe models (known-good, benchmarked), we can swap in better models.
+The custom WGSL engine doesn't care which model's weights it runs. The immediate upgrade is **hand_landmark_sparse** (see "RTMPose hand-only evaluation" section below) -- same architecture as our current model, just wider, with vastly better pinch tracking.
 
-**RTMPose** (from OpenMMLab/MMPose) is the leading candidate:
-- Apache 2.0 license (commercial OK)
-- Accuracy close to OpenPose (the research gold standard), speed close to MediaPipe
-- Hand-specific models available
-- Simpler architecture than MediaPipe's two-stage cascade (can do single-stage)
-- Exports to ONNX cleanly (we'd dump the graph and write fused shaders, same process)
-- Backed by Chinese University of Hong Kong / SenseTime
-
-**Confirmed viable (2026-04-12):** RTMPose has pre-exported ONNX models available for download (hand, face, body). [rtmlib](https://github.com/Tau-J/rtmlib) is a lightweight Python library that runs RTMPose inference with just ONNX Runtime — no PyTorch or MMCV needed. Official export pipeline via `tools/deploy.py` for custom configs. We could grab a pre-exported ONNX hand model today, dump its graph, and see exactly which ops it uses. When our WGSL engine is ready, swapping models is: dump graph → write fused shaders → done.
-
-Sources: [RTMPose project](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose), [rtmlib](https://github.com/Tau-J/rtmlib), [MMPose deployment docs](https://mmpose.readthedocs.io/en/latest/user_guides/how_to_deploy.html)
+**RTMPose evaluated and ruled out (2026-04-20):** RTMPose-m hand is 13x larger (53MB, 13.59M params) and 5.5x slower than our current pipeline. Only one hand variant exists (medium, alpha). fp16 gives zero inference speedup on Apple Silicon. Nobody has shipped it in-browser. The accuracy advantage on prayer/pinch hands does not justify the cost when hand_landmark_sparse achieves similar gains at 10.1MB. See full evaluation below.
 
 Other options surveyed (2026-04-12):
 - **OpenPose**: best accuracy but non-commercial license. Dead end for a product.
 - **YOLOv8/v11 Pose**: good accuracy, fast, but AGPL license (or paid commercial). Risky.
-- **MMPose (general)**: research toolkit, many models, Apache 2.0. RTMPose is their production-grade export.
+- **MMPose (general)**: research toolkit, many models, Apache 2.0. RTMPose is their production-grade export -- evaluated and too heavy for browser.
 
-None of these run on WebGPU today. They all assume CUDA/PyTorch. Our engine is the thing that makes them browser-runnable. Build the engine first on MediaPipe models, explore upgrades after.
+The engine's flexibility remains: any ONNX model that uses our supported ops can be compiled to WGSL. But for hand tracking, the MediaPipe model family (lite/full/sparse) covers the accuracy-size spectrum we need.
 
-### Next session: try the RTMPose hand-only model (prioritized ahead of z-depth)
+### RTMPose hand-only evaluation: COMPLETED (2026-04-20)
 
-Session 2026-04-17 ran extensive prayer-hands debugging and concluded our MediaPipe hand landmark model has a fundamental limitation: when two hands overlap, the model's per-slot ROI can cover both hands, and the model picks whichever is more prominent. MediaPipe's own JS SDK handles this better because they have more sophisticated tracking state; we've replicated what we can at the pipeline level (centroid identity tracking, duplicate detection, palm re-anchor during overlap) but the landmark model itself remains the weak link.
+**Result: RTMPose is NOT viable for browser real-time hand tracking.**
 
-**Plan:** swap in the RTMPose hand-only model before tackling z-depth. The hypothesis is that RTMPose's SimCC coordinate-classification approach may localize keypoints more accurately on non-trivial hand poses (curled fingers, extreme angles, occluded fingertips) than MediaPipe's regression approach. Those are exactly the poses that matter for sign-language-style gestures in Spellaria.
+Session 2026-04-20 built a full A/B test page (`engine/test-rtmpose.html`) comparing our WGSL pipeline, RTMPose fp32, RTMPose fp16, and the MediaPipe sparse landmark model. Key findings:
 
-**What to do (experiment, not a full integration):**
-1. Download a pre-exported RTMPose hand-only ONNX model via [rtmlib](https://github.com/Tau-J/rtmlib) or [OpenMMLab Deploee](https://platform.openmmlab.com/deploee/). Pick `rtmpose-m-hand` or similar -- a 21-keypoint hand-only variant (not whole-body).
-2. Estimated size: ~15-20MB for the hand-only variant (vs ~4MB for MediaPipe's hand_landmark_full). Bigger, but within reason for a web demo with caching.
-3. Run it through ORT Web + WebGPU first (not our engine) for a quick A/B vs MediaPipe on the same test video. No engine plumbing until we've confirmed the model is actually better for our use case.
-4. If accuracy/robustness is meaningfully better, then: dump the ONNX graph, compile through our ModelRunner, write any missing ops, wire through `landmark-worker-wgsl.js`.
+**RTMPose benchmarks (via ORT WebGPU EP on M1 Mac):**
 
-**Architectural note**: this would also demonstrate the library's flexibility -- same WebGPU engine runs both models. Users could pick the backend that fits their task. Both Apache 2.0, both commercially shippable.
+| Model | Landmark time | Model size | Accuracy |
+|---|---|---|---|
+| Our WGSL pipeline (hand_landmark_full) | ~10.5ms full pipeline | 4.1MB | Good, struggles with prayer hands |
+| RTMPose-m fp32 | ~57ms landmark only | 53MB | Better on prayer hands |
+| RTMPose-m fp16 | ~55ms landmark only | 26MB | Same as fp32 (no speedup on M1) |
+| **hand_landmark_sparse (batched)** | **~11ms both hands** | **10.1MB** | **Vastly superior pinch tracking** |
 
-**Mix-and-match is fine** -- face and hand pipelines are fully independent in our architecture (separate workers, separate ROIs, separate event streams). Only `landmark-worker-wgsl.js` changes for a hand-model swap; face stays untouched. The demo can offer "Face: MediaPipe, Hands: RTMPose" as a combo (or any other combination) by just selecting different model URLs per pipeline.
+**Why RTMPose failed:**
+- Only one hand model variant exists (medium, 13.59M params, 2.6 GFLOPs). No tiny/small hand versions. The body pose has t/s/m/l but hand is alpha and medium-only.
+- 13x more parameters than MediaPipe's hand landmark (~1M params). The 5.5x speed gap is expected.
+- fp16 conversion halved download size (53MB -> 26MB) but gave zero inference speedup on M1 -- GPU runs the same computation, just with smaller weights in memory.
+- Loading the 53MB model caused GPU contention that degraded our WGSL pipeline's concurrent inference.
+- Nobody has shipped RTMPose hands in-browser. Zero working browser demos found anywhere.
+- ORT WebGPU dispatch overhead: hundreds of individual GPU dispatches at ~24-36us each adds 10-20ms of overhead on top of the model's actual compute cost.
 
-**Pipeline shape with RTMPose**: RTMPose's hand-only variant expects a pre-cropped hand image -- it does NOT include a detection stage. MediaPipe's palm detector is already doing a great job finding where hands are, so keep it. The stack becomes:
-- **MediaPipe palm detector** (unchanged) -> finds hand location / generates initial ROI
-- **RTMPose hand landmarks** (new) -> 21 keypoints from the cropped ROI
-- Tracking loop (landmarks -> next-frame ROI) stays the same
+**The real discovery: hand_landmark_sparse**
 
-So you get MediaPipe's proven detector + RTMPose's (hypothetically more accurate) landmark localization.
+While searching PINTO0309's model zoo for alternatives, we found `hand_landmark_sparse_Nx3x224x224.onnx` -- a **larger variant of the same MediaPipe hand landmark model** we already use. Same family, same architecture, same Apache 2.0 license. Key differences:
+- 10.1MB vs 4.1MB (wider layers, more parameters)
+- Supports batch inference: `[N, 3, 224, 224]` input (both hands in one forward pass)
+- Same output format: `xyz_x21 [N, 63]`, `hand_score [N, 1]`, `lefthand_or_righthand [N, 1]`
+- **Pinch tracking is VASTLY superior** to hand_landmark_full
 
-**Decoding note**: RTMPose outputs SimCC dual heatmaps (one per axis), not regressed coordinates. The landmark decode in `landmark-worker-wgsl.js` needs argmax-with-softargmax refinement over the heatmap to extract keypoint positions. More post-processing than MediaPipe's "reshape 63 floats into 21x3", but the math is well-documented in the RTMPose paper.
+Running through ORT WebGPU (not yet ported to our WGSL engine), the sparse model does both hands batched in ~11ms. Through our fused WGSL engine, estimated ~5-8ms per hand.
 
-**What RTMPose does NOT give us:**
-- Sign-language classification (that's a separate stage built on top of pose keypoints -- small MLP for static signs, LSTM/transformer for dynamic signs. Would need custom training on Spellaria's gesture vocabulary)
-- Z-depth (RTMPose hand-only is 2D; RTMPose3D is whole-body and ~200MB+). For z we should derive from landmark spread (see below).
+**Test page:** `engine/test-rtmpose.html` has a dropdown to switch between all four models live. Uses `requestVideoFrameCallback` + fire-and-forget pattern matching ball-toss demo.
+
+**Technical notes for the test page:**
+- ORT loaded with pre-fetched wasm binary to bypass Vite's module transform (Vite rewrites ORT's internal dynamic imports, breaking wasm resolution)
+- RTMPose uses ImageNet normalization (mean/std), NCHW format, 256x256 input, SimCC decode (argmax over [1,21,512] tensors)
+- Sparse model uses MediaPipe normalization ([0,1]), NCHW format, 224x224 input, same decode as hand_landmark_full
+- Rotated-rect crop via canvas affine chain with projection in pixel space (not normalized space) to avoid aspect ratio distortion
+
+### Next: port hand_landmark_sparse to WGSL engine
+
+The sparse model is the clear upgrade path. Same architecture as hand_landmark_full (which our WGSL engine already runs), just wider. The port:
+
+1. Dump the sparse ONNX graph to JSON (same `onnx_to_json.py` process)
+2. Extract weights to flat binary
+3. Feed through `ModelRunner` -- should compile with zero new ops needed
+4. Wire into `landmark-worker-wgsl.js` with a config flag for model selection
+5. Benchmark through WGSL engine (expect ~5-8ms per hand, ~8-12ms batched)
+
+**The batch dimension is the real win.** Currently our pipeline runs two separate landmark inference calls (one per hand). The sparse model's `[N, 3, 224, 224]` input lets us do both in a single GPU dispatch chain. This alone could cut landmark latency nearly in half for two-hand tracking.
+
+**Priority:** HIGH. This is the cheapest accuracy improvement available -- no new architecture, no new ops, same license. Just bigger weights through the same engine.
 
 ### Face tracking alternative: PFLD (Practical Facial Landmark Detector)
 

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>RTMPose Hand A/B Test</title></head>
+<body style="background:#111;color:#0f0;font:13px monospace;padding:16px;">
+<div style="margin-bottom:12px;">
+  <label style="color:#ccc;">Pipeline:
+    <select id="mode" style="font:14px monospace;background:#222;color:#0f0;border:1px solid #555;padding:4px 8px;">
+      <option value="wgsl">WebGPU Vision (our WGSL) - 3.9MB</option>
+      <option value="sparse">Sparse (MediaPipe family, batched) - 10.1MB</option>
+      <option value="rtmpose">RTMPose fp32 (ORT WebGPU) - 53MB</option>
+      <option value="rtmpose16">RTMPose fp16 (ORT WebGPU) - 26MB</option>
+    </select>
+  </label>
+  <span id="status" style="color:#888;margin-left:16px;"></span>
+</div>
+<div style="display:flex;gap:16px;">
+  <div>
+    <div style="color:#888;">Webcam</div>
+    <video id="video" width="640" height="480" autoplay playsinline muted style="background:#000;transform:scaleX(-1);"></video>
+  </div>
+  <div>
+    <div id="canvas-label" style="color:#0f0;">WebGPU Vision (our WGSL)</div>
+    <canvas id="canvas" width="640" height="480" style="background:#000;"></canvas>
+  </div>
+</div>
+<div id="log" style="white-space:pre-wrap;margin-top:16px;"></div>
+
+<script type="module">
+import { HandTracker } from '../src/pipeline.js';
+
+// Load ORT + its wasm binary bypassing Vite's module transform
+const ortUrl = new URL('../vendor/onnxruntime-web/ort.webgpu.min.mjs', import.meta.url).href;
+const wasmUrl = new URL('../vendor/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm', import.meta.url).href;
+const [ort, wasmBinary] = await Promise.all([
+  import(/* @vite-ignore */ ortUrl),
+  fetch(wasmUrl).then(r => r.arrayBuffer()),
+]);
+ort.env.wasm.wasmBinary = wasmBinary;
+
+const L = document.getElementById('log');
+const log = s => { L.textContent += s + '\n'; console.log(s); };
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const modeSelect = document.getElementById('mode');
+const canvasLabel = document.getElementById('canvas-label');
+const statusEl = document.getElementById('status');
+
+const savedMode = localStorage.getItem('wgv_ab_mode') || 'wgsl';
+let currentMode = savedMode;
+let times = [];
+let switching = false;
+modeSelect.value = savedMode;
+canvasLabel.textContent = modeSelect.options[modeSelect.selectedIndex].text;
+canvasLabel.style.color = savedMode === 'wgsl' ? '#0f0' : savedMode === 'sparse' ? '#0af' : '#ff0';
+
+function isRtmMode(mode) { return mode === 'rtmpose' || mode === 'rtmpose16'; }
+function isSparseMode(mode) { return mode === 'sparse'; }
+
+modeSelect.onchange = async () => {
+  const newMode = modeSelect.value;
+  canvasLabel.textContent = modeSelect.options[modeSelect.selectedIndex].text;
+  canvasLabel.style.color = newMode === 'wgsl' ? '#0f0' : newMode === 'sparse' ? '#0af' : '#ff0';
+  times = [];
+  localStorage.setItem('wgv_ab_mode', newMode);
+
+  if (newMode === 'sparse' && !sparseSession) {
+    switching = true;
+    statusEl.textContent = 'Loading Sparse model (10.1MB)...';
+    log('\nLazy-loading Sparse (MediaPipe family)...');
+    await loadSparse();
+    statusEl.textContent = 'Ready';
+    switching = false;
+  }
+  if (newMode === 'rtmpose' && !rtmSession) {
+    switching = true;
+    statusEl.textContent = 'Loading RTMPose fp32 (53MB)...';
+    log('\nLazy-loading RTMPose fp32...');
+    await loadRTMPose('../models/rtmpose_hand.onnx', 'fp32');
+    statusEl.textContent = 'Ready';
+    switching = false;
+  }
+  if (newMode === 'rtmpose16' && !rtmSession16) {
+    switching = true;
+    statusEl.textContent = 'Loading RTMPose fp16 (26MB)...';
+    log('\nLazy-loading RTMPose fp16...');
+    await loadRTMPose16('../models/rtmpose_hand_fp16.onnx', 'fp16');
+    statusEl.textContent = 'Ready';
+    switching = false;
+  }
+
+  currentMode = newMode;
+  log(`\nSwitched to: ${modeSelect.options[modeSelect.selectedIndex].text}`);
+};
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],
+];
+
+function drawHand(landmarks, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  for (const [a, b] of CONNECTIONS) {
+    const la = landmarks[a], lb = landmarks[b];
+    ctx.beginPath();
+    ctx.moveTo((1 - la.x) * 640, la.y * 480);
+    ctx.lineTo((1 - lb.x) * 640, lb.y * 480);
+    ctx.stroke();
+  }
+  ctx.fillStyle = color;
+  for (const lm of landmarks) {
+    ctx.beginPath();
+    ctx.arc((1 - lm.x) * 640, lm.y * 480, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const MEAN = [123.675, 116.28, 103.53];
+const STD = [58.395, 57.12, 57.375];
+const INPUT_H = 256, INPUT_W = 256;
+const SIMCC_RATIO = 2.0;
+const MAX_SAMPLES = 60;
+
+// Sparse (MediaPipe family) state -- lazy loaded
+let sparseSession = null;
+const SPARSE_H = 224, SPARSE_W = 224;
+const sparseCropCanvas = new OffscreenCanvas(SPARSE_W, SPARSE_H);
+const sparseCropCtx = sparseCropCanvas.getContext('2d', { willReadFrequently: true });
+
+// RTMPose state -- lazy loaded (two variants)
+let rtmSession = null;
+let rtmSession16 = null;
+
+function activeRtmSession() {
+  return currentMode === 'rtmpose16' ? rtmSession16 : rtmSession;
+}
+
+async function _loadOrtSession(modelPath, label, h = INPUT_H, w = INPUT_W) {
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.proxy = false;
+  let session;
+  try {
+    session = await ort.InferenceSession.create(
+      modelPath,
+      { executionProviders: ['webgpu'], preferredOutputLocation: 'cpu' }
+    );
+    log(`  ${label} loaded (WebGPU EP)`);
+  } catch (e) {
+    log(`  WebGPU EP failed, WASM fallback: ${e.message}`);
+    session = await ort.InferenceSession.create(
+      modelPath,
+      { executionProviders: ['wasm'] }
+    );
+    log(`  ${label} loaded (WASM)`);
+  }
+  const warmup = new ort.Tensor('float32', new Float32Array(3 * h * w), [1, 3, h, w]);
+  await session.run({ [session.inputNames[0]]: warmup });
+  log(`  ${label} warmed up`);
+  return session;
+}
+
+async function loadSparse() {
+  sparseSession = await _loadOrtSession(
+    '../models/hand_landmark_sparse_Nx3x224x224.onnx', 'Sparse', SPARSE_H, SPARSE_W
+  );
+}
+
+function sparseCropAndNormalize(videoEl, rect) {
+  const cx = rect.cx, cy = rect.cy;
+  const rw = rect.w, rh = rect.h;
+  const angle = rect.angle || 0;
+  const vidW = videoEl.videoWidth, vidH = videoEl.videoHeight;
+  sparseCropCtx.save();
+  sparseCropCtx.clearRect(0, 0, SPARSE_W, SPARSE_H);
+  sparseCropCtx.translate(SPARSE_W / 2, SPARSE_H / 2);
+  sparseCropCtx.scale(SPARSE_W / rw, SPARSE_H / rh);
+  sparseCropCtx.rotate(-angle);
+  sparseCropCtx.translate(-cx, -cy);
+  sparseCropCtx.drawImage(videoEl, 0, 0, vidW, vidH);
+  sparseCropCtx.restore();
+  const imgData = sparseCropCtx.getImageData(0, 0, SPARSE_W, SPARSE_H).data;
+  const nchw = new Float32Array(3 * SPARSE_H * SPARSE_W);
+  const planeSize = SPARSE_H * SPARSE_W;
+  for (let i = 0; i < planeSize; i++) {
+    nchw[i]                = imgData[i * 4]     / 255.0;
+    nchw[i + planeSize]    = imgData[i * 4 + 1] / 255.0;
+    nchw[i + planeSize * 2]= imgData[i * 4 + 2] / 255.0;
+  }
+  return nchw;
+}
+
+function decodeSparseOutput(xyzData, rect, vw, vh, offset) {
+  const angle = rect.angle || 0;
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
+  const landmarks = [];
+  for (let k = 0; k < 21; k++) {
+    const lx = xyzData[offset + k * 3] / SPARSE_W;
+    const ly = xyzData[offset + k * 3 + 1] / SPARSE_H;
+    const lz = xyzData[offset + k * 3 + 2];
+    let dx = (lx - 0.5) * rect.w;
+    let dy = (ly - 0.5) * rect.h;
+    landmarks.push({
+      x: (rect.cx + dx * cosA - dy * sinA) / vw,
+      y: (rect.cy + dx * sinA + dy * cosA) / vh,
+      z: lz,
+    });
+  }
+  return landmarks;
+}
+
+async function loadRTMPose() {
+  rtmSession = await _loadOrtSession('../models/rtmpose_hand.onnx', 'RTMPose fp32');
+}
+async function loadRTMPose16() {
+  rtmSession16 = await _loadOrtSession('../models/rtmpose_hand_fp16.onnx', 'RTMPose fp16');
+}
+
+// Crop helper for RTMPose
+const cropCanvas = new OffscreenCanvas(INPUT_W, INPUT_H);
+const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+
+function cropAndNormalize(videoEl, rect) {
+  const cx = rect.cx, cy = rect.cy;
+  const rw = rect.w, rh = rect.h;
+  const angle = rect.angle || 0;
+  const vidW = videoEl.videoWidth, vidH = videoEl.videoHeight;
+  cropCtx.save();
+  cropCtx.clearRect(0, 0, INPUT_W, INPUT_H);
+  // Proper rotated-rect crop via affine chain:
+  // 1. Center canvas at crop center
+  // 2. Scale crop region to fill 256x256
+  // 3. Rotate to straighten the hand
+  // 4. Translate so rect center maps to origin
+  // 5. Draw video at pixel dimensions (not element dimensions)
+  cropCtx.translate(INPUT_W / 2, INPUT_H / 2);
+  cropCtx.scale(INPUT_W / rw, INPUT_H / rh);
+  cropCtx.rotate(-angle);
+  cropCtx.translate(-cx, -cy);
+  cropCtx.drawImage(videoEl, 0, 0, vidW, vidH);
+  cropCtx.restore();
+  const imgData = cropCtx.getImageData(0, 0, INPUT_W, INPUT_H).data;
+  const nchw = new Float32Array(3 * INPUT_H * INPUT_W);
+  const planeSize = INPUT_H * INPUT_W;
+  for (let i = 0; i < planeSize; i++) {
+    nchw[i]                = (imgData[i * 4]     - MEAN[0]) / STD[0];
+    nchw[i + planeSize]    = (imgData[i * 4 + 1] - MEAN[1]) / STD[1];
+    nchw[i + planeSize * 2]= (imgData[i * 4 + 2] - MEAN[2]) / STD[2];
+  }
+  return nchw;
+}
+
+function decodeSimCC(simccX, simccY, numKpts, simccLen) {
+  const landmarks = [];
+  for (let k = 0; k < numKpts; k++) {
+    const offX = k * simccLen, offY = k * simccLen;
+    let maxXVal = -Infinity, maxXIdx = 0;
+    let maxYVal = -Infinity, maxYIdx = 0;
+    for (let j = 0; j < simccLen; j++) {
+      if (simccX[offX + j] > maxXVal) { maxXVal = simccX[offX + j]; maxXIdx = j; }
+      if (simccY[offY + j] > maxYVal) { maxYVal = simccY[offY + j]; maxYIdx = j; }
+    }
+    landmarks.push({
+      x: maxXIdx / SIMCC_RATIO / INPUT_W,
+      y: maxYIdx / SIMCC_RATIO / INPUT_H,
+      score: 0.5 * (maxXVal + maxYVal),
+    });
+  }
+  return landmarks;
+}
+
+function projectLandmarks(lms, rect, vw, vh) {
+  const angle = rect.angle || 0;
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
+  return lms.map(lm => {
+    // Work in pixel space so rotation doesn't distort aspect ratio
+    let dx = (lm.x - 0.5) * rect.w;
+    let dy = (lm.y - 0.5) * rect.h;
+    return {
+      x: (rect.cx + dx * cosA - dy * sinA) / vw,
+      y: (rect.cy + dx * sinA + dy * cosA) / vh,
+      score: lm.score,
+    };
+  });
+}
+
+(async () => {
+try {
+  log('RTMPose Hand A/B Test');
+  log('=====================');
+  log('WGSL loads now. RTMPose loads lazily on first switch.\n');
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 480, facingMode: 'user' }
+  });
+  video.srcObject = stream;
+  await video.play();
+  const vw = video.videoWidth, vh = video.videoHeight;
+  log(`Webcam: ${vw}x${vh}`);
+
+  // Only load WGSL pipeline at startup -- no GPU contention
+  log('\nLoading WebGPU Vision hand pipeline...');
+  statusEl.textContent = 'Loading WebGPU Vision...';
+  const tracker = new HandTracker();
+  await tracker.init(s => log('  ' + s));
+  log('WebGPU Vision ready');
+
+  if (currentMode === 'sparse') {
+    statusEl.textContent = 'Loading Sparse model (10.1MB)...';
+    log('\nLazy-loading Sparse (saved preference)...');
+    await loadSparse();
+  } else if (currentMode === 'rtmpose') {
+    statusEl.textContent = 'Loading RTMPose fp32 (53MB)...';
+    log('\nLazy-loading RTMPose fp32 (saved preference)...');
+    await loadRTMPose();
+  } else if (currentMode === 'rtmpose16') {
+    statusEl.textContent = 'Loading RTMPose fp16 (26MB)...';
+    log('\nLazy-loading RTMPose fp16 (saved preference)...');
+    await loadRTMPose16();
+  }
+  statusEl.textContent = 'Ready';
+
+  log('\nTracking active. Switch dropdown to compare RTMPose.\n');
+
+  let handBusy = false;
+  let lastHands = [null, null];
+  let lastRects = [];
+  let lastPipeMs = 0;
+
+  function tick() {
+    if (switching) { video.requestVideoFrameCallback(tick); return; }
+
+    // Fire-and-forget pipeline call (matches ball-toss pattern)
+    if (!handBusy) {
+      handBusy = true;
+      const t0 = performance.now();
+      tracker.processFrame(video).then(result => {
+        lastPipeMs = performance.now() - t0;
+        lastHands = result?.hands || [null, null];
+        lastRects = result?.debug?.rects || [];
+        handBusy = false;
+
+        if (isSparseMode(currentMode) && sparseSession && lastRects.length > 0) {
+          runSparse(lastRects);
+        } else if (isRtmMode(currentMode) && activeRtmSession() && lastRects.length > 0) {
+          runRTMPose(lastRects);
+        }
+      }).catch(e => { console.error('processFrame error:', e); handBusy = false; });
+    }
+
+    // Draw every video frame callback regardless of pipeline state
+    draw();
+    video.requestVideoFrameCallback(tick);
+  }
+
+  let sparseHands = [];
+  let sparseBusy = false;
+  let lastSparseMs = 0;
+
+  async function runSparse(rects) {
+    if (sparseBusy || !sparseSession) return;
+    sparseBusy = true;
+    const t0 = performance.now();
+    const validRects = rects.filter(Boolean);
+    const N = validRects.length;
+    if (N === 0) { sparseBusy = false; return; }
+
+    // Batch: crop all hands into one tensor
+    const batchData = new Float32Array(N * 3 * SPARSE_H * SPARSE_W);
+    const planeSize = 3 * SPARSE_H * SPARSE_W;
+    for (let i = 0; i < N; i++) {
+      const crop = sparseCropAndNormalize(video, validRects[i]);
+      batchData.set(crop, i * planeSize);
+    }
+
+    const inputTensor = new ort.Tensor('float32', batchData, [N, 3, SPARSE_H, SPARSE_W]);
+    const out = await sparseSession.run({ [sparseSession.inputNames[0]]: inputTensor });
+
+    const xyzData = out['xyz_x21'].data;
+    const hands = [];
+    for (let i = 0; i < N; i++) {
+      hands.push(decodeSparseOutput(xyzData, validRects[i], vw, vh, i * 63));
+    }
+    lastSparseMs = performance.now() - t0;
+    sparseHands = hands;
+    sparseBusy = false;
+  }
+
+  let rtmHands = [];
+  let rtmBusy = false;
+  let lastRtmMs = 0;
+
+  async function runRTMPose(rects) {
+    if (rtmBusy) return;
+    rtmBusy = true;
+    const t0 = performance.now();
+    const hands = [];
+    for (const rect of rects) {
+      if (!rect) continue;
+      const nchw = cropAndNormalize(video, rect);
+      const inputTensor = new ort.Tensor('float32', nchw, [1, 3, INPUT_H, INPUT_W]);
+      const sess = activeRtmSession();
+      const out = await sess.run({ [sess.inputNames[0]]: inputTensor });
+
+      const simccXData = out[sess.outputNames[0]].data;
+      const simccYData = out[sess.outputNames[1]].data;
+      const simccLen = out[sess.outputNames[0]].dims[2];
+      const numKpts = out[sess.outputNames[0]].dims[1];
+
+      const lms = decodeSimCC(simccXData, simccYData, numKpts, simccLen);
+      hands.push(projectLandmarks(lms, rect, vw, vh));
+    }
+    lastRtmMs = performance.now() - t0;
+    rtmHands = hands;
+    rtmBusy = false;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, 640, 480);
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, -640, 0, 640, 480);
+    ctx.restore();
+
+    if (currentMode === 'wgsl') {
+      times.push(lastPipeMs);
+      if (times.length > MAX_SAMPLES) times.shift();
+
+      for (const hand of lastHands) {
+        if (hand?.landmarks) drawHand(hand.landmarks, '#0f0');
+      }
+
+      const avg = times.length ? times.reduce((a,b) => a+b) / times.length : 0;
+      ctx.fillStyle = '#0f0';
+      ctx.font = '16px monospace';
+      ctx.fillText(`WGSL: ${lastPipeMs.toFixed(1)}ms (avg ${avg.toFixed(1)}ms)`, 10, 24);
+      ctx.fillText(`Hands: ${lastHands.filter(Boolean).length}`, 10, 46);
+
+    } else if (isSparseMode(currentMode) && sparseSession) {
+      times.push(lastSparseMs || lastPipeMs);
+      if (times.length > MAX_SAMPLES) times.shift();
+
+      for (const lms of sparseHands) {
+        drawHand(lms, '#0af');
+      }
+
+      const avg = times.length ? times.reduce((a,b) => a+b) / times.length : 0;
+      ctx.fillStyle = '#0af';
+      ctx.font = '16px monospace';
+      ctx.fillText(`Sparse: ${(lastPipeMs + lastSparseMs).toFixed(1)}ms`, 10, 24);
+      ctx.fillText(`  Track: ${lastPipeMs.toFixed(1)}ms  Landmark: ${lastSparseMs.toFixed(1)}ms`, 10, 46);
+      ctx.fillText(`Hands: ${sparseHands.length} (batched)`, 10, 68);
+
+    } else if (isRtmMode(currentMode) && activeRtmSession()) {
+      times.push(lastRtmMs || lastPipeMs);
+      if (times.length > MAX_SAMPLES) times.shift();
+
+      for (const lms of rtmHands) {
+        drawHand(lms, '#ff0');
+      }
+
+      const label = currentMode === 'rtmpose16' ? 'RTMPose fp16' : 'RTMPose fp32';
+      const avg = times.length ? times.reduce((a,b) => a+b) / times.length : 0;
+      ctx.fillStyle = '#ff0';
+      ctx.font = '16px monospace';
+      ctx.fillText(`${label}: ${(lastPipeMs + lastRtmMs).toFixed(1)}ms`, 10, 24);
+      ctx.fillText(`  Track: ${lastPipeMs.toFixed(1)}ms  Landmark: ${lastRtmMs.toFixed(1)}ms`, 10, 46);
+      ctx.fillText(`Hands: ${rtmHands.length}`, 10, 68);
+    }
+  }
+
+  video.requestVideoFrameCallback(tick);
+
+  // Print stats every 5 seconds
+  setInterval(() => {
+    if (currentMode === 'wgsl' && times.length > 0) {
+      const sorted = [...times].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const avg = times.reduce((a,b) => a+b) / times.length;
+      log(`[WGSL] median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (full pipeline, model: 3.9MB)`);
+    }
+    if (isSparseMode(currentMode) && times.length > 0) {
+      const sorted = [...times].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const avg = times.reduce((a,b) => a+b) / times.length;
+      log(`[Sparse] track=${lastPipeMs.toFixed(1)}ms landmark=${lastSparseMs.toFixed(1)}ms median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (batched, model: 10.1MB)`);
+    }
+    if (isRtmMode(currentMode) && times.length > 0) {
+      const sorted = [...times].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const label = currentMode === 'rtmpose16' ? 'RTMPose-fp16' : 'RTMPose-fp32';
+      const size = currentMode === 'rtmpose16' ? '26MB' : '53MB';
+      log(`[${label}] track=${lastPipeMs.toFixed(1)}ms landmark=${lastRtmMs.toFixed(1)}ms median=${median.toFixed(1)}ms n=${times.length} (model: ${size})`);
+    }
+  }, 5000);
+
+} catch (e) {
+  log('ERROR: ' + e.message);
+  log(e.stack || '');
+}
+})();
+</script>
+</body>
+</html>
