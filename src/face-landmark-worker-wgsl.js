@@ -1,7 +1,10 @@
 // Face landmark worker: WGSL engine (replaces ORT).
 // Receives ImageBitmap + rect, does GPU affine warp + WGSL inference -> 478 landmarks.
 
+import { applyLogGatesFromUrl, log } from './log-gates.js';
 import { ModelRunner } from '../engine/model-runner.js';
+
+applyLogGatesFromUrl();
 
 const S = 256; // face landmark model input size
 const NUM_LANDMARKS = 478;
@@ -182,7 +185,7 @@ self.onmessage = async (e) => {
   if (type === 'init') {
     try {
       await initGPU();
-      console.log('[face-lm-worker-wgsl] ready (compiled WGSL engine)');
+      log('lifecycle', '[face-lm-worker-wgsl] ready (compiled WGSL engine)');
       self.postMessage({ type: 'ready', gpuDirect: true });
     } catch (err) {
       console.error('[face-lm-worker-wgsl] init error:', err);

@@ -1,7 +1,10 @@
 // Hand landmark worker: WGSL engine (replaces ORT).
 // Receives ImageBitmap + rotated rect, does GPU affine warp + WGSL inference.
 
+import { applyLogGatesFromUrl, log } from './log-gates.js';
 import { ModelRunner } from '../engine/model-runner.js';
+
+applyLogGatesFromUrl();
 
 const S = 224; // landmark model input size
 const MODEL_JSON_URL = '../models/hand_landmark_full.json';
@@ -194,7 +197,7 @@ self.onmessage = async (e) => {
   if (type === 'init') {
     try {
       await initGPU();
-      console.log('[landmark-worker-wgsl] ready (compiled WGSL engine)');
+      log('lifecycle', '[landmark-worker-wgsl] ready (compiled WGSL engine)');
       self.postMessage({ type: 'ready', gpuDirect: true });
     } catch (err) {
       console.error('[landmark-worker-wgsl] init error:', err);

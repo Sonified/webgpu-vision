@@ -1,9 +1,12 @@
 // Face detection worker: WGSL engine (replaces ORT).
 // Receives ImageBitmap, does GPU letterbox + WGSL inference + decode + NMS.
 
+import { applyLogGatesFromUrl, log } from './log-gates.js';
 import { ModelRunner } from '../engine/model-runner.js';
 import { generateFaceAnchors, decodeFaceDetections } from './face-anchors.js';
 import { weightedNMS } from './face-nms.js';
+
+applyLogGatesFromUrl();
 
 const FACE_SIZE = 128;
 const MODEL_JSON_URL = '../models/face_detector.json';
@@ -173,7 +176,7 @@ self.onmessage = async (e) => {
     try {
       anchors = generateFaceAnchors();
       await initGPU();
-      console.log('[face-detection-worker-wgsl] ready (compiled WGSL engine)');
+      log('lifecycle', '[face-detection-worker-wgsl] ready (compiled WGSL engine)');
       self.postMessage({ type: 'ready', gpuLetterbox: true, gpuDirect: true });
     } catch (err) {
       console.error('[face-detection-worker-wgsl] init error:', err);

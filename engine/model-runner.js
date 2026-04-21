@@ -7,6 +7,8 @@
  *   const outputs = await runner.run(graphJson, inputBuffer);
  */
 
+import { log } from '../src/log-gates.js';
+
 export class ModelRunner {
   constructor(device, pipelines, weightBufs, allWeightsBuf) {
     this.device = device;
@@ -180,7 +182,7 @@ export class ModelRunner {
         if (actIdx >= 0) skipNodes.add(actIdx);
       }
       if (fusedBlocks.size > 0 && !this._fusionLogged) {
-        console.log(`[fusion] ${fusedBlocks.size} blocks fused, ${skipNodes.size} nodes skipped`);
+        log('lifecycle', `[fusion] ${fusedBlocks.size} blocks fused, ${skipNodes.size} nodes skipped`);
         this._fusionLogged = true;
       }
     }
@@ -782,7 +784,7 @@ export class ModelRunner {
     }
 
     this._buildReadbackBuffers();
-    console.log(`[compiled] ${this._steps.length} GPU steps, ${this._readbackInfos.length} outputs pre-allocated`);
+    log('lifecycle', `[compiled] ${this._steps.length} GPU steps, ${this._readbackInfos.length} outputs pre-allocated`);
     return outputs;
   }
 

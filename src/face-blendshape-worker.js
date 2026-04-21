@@ -1,7 +1,10 @@
 // Face blendshape worker: takes 146 landmark points, outputs 52 expression coefficients.
 // Runs independently from the landmark worker so it doesn't block the next frame.
 
+import { applyLogGatesFromUrl, log } from './log-gates.js';
 import * as ort from '../vendor/onnxruntime-web/ort.webgpu.min.mjs';
+
+applyLogGatesFromUrl();
 
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;
@@ -40,7 +43,7 @@ self.onmessage = async (e) => {
       const warmup = new ort.Tensor('float32', new Float32Array(146 * 2), [1, 146, 2]);
       await session.run({ [session.inputNames[0]]: warmup });
 
-      console.log('[blendshape-worker] ready');
+      log('lifecycle', '[blendshape-worker] ready');
       self.postMessage({ type: 'ready' });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });

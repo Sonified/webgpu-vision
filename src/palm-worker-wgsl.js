@@ -1,9 +1,15 @@
 // Palm detection worker: WGSL engine (replaces ORT).
 // Receives ImageBitmap, does GPU letterbox + WGSL inference + decode + NMS.
 
+import { applyLogGatesFromUrl, log } from './log-gates.js';
 import { ModelRunner } from '../engine/model-runner.js';
 import { generateAnchors, decodeDetections } from './anchors.js';
 import { weightedNMS } from './nms.js';
+
+// Load gate state BEFORE any other code in this worker runs so the first
+// gated log (e.g. worker ready) respects the user's preferences. ES imports
+// are evaluated before this line but none log at evaluation time.
+applyLogGatesFromUrl();
 
 const PALM_SIZE = 192;
 const MODEL_JSON_URL = '../models/palm_detection_lite.json';
@@ -175,7 +181,7 @@ self.onmessage = async (e) => {
     try {
       anchors = generateAnchors();
       await initGPU();
-      console.log('[palm-worker-wgsl] ready (compiled WGSL engine)');
+      log('lifecycle', '[palm-worker-wgsl] ready (compiled WGSL engine)');
       self.postMessage({ type: 'ready', gpuLetterbox: true, gpuDirect: true });
     } catch (err) {
       console.error('[palm-worker-wgsl] init error:', err);

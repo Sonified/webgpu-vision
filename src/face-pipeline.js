@@ -4,22 +4,12 @@
 
 import { faceDetectionToRect } from './face-nms.js';
 import { FACE_DETECTOR_URL, FACE_LANDMARK_URL, FACE_BLENDSHAPE_URL } from './model-urls.js';
+import { workerUrlWithGates, registerWorkerForGateUpdates, log, makeLogger } from './log-gates.js';
 const FACE_FLAG_THRESHOLD = 0.5;
 
-// Rate-limited logger
-function makeLogger(intervalMs = 2000) {
-  let lastLog = 0;
-  return function(msg, ...args) {
-    const now = performance.now();
-    if (now - lastLog > intervalMs) {
-      console.log(msg, ...args);
-      lastLog = now;
-    }
-  };
-}
-const logDetect = makeLogger(2000);
-const logSlot = makeLogger(2000);
-const logLandmark = makeLogger(2000);
+const logDetect = makeLogger('tracking', 2000);
+const logSlot = makeLogger('tracking', 2000);
+const logLandmark = makeLogger('tracking', 2000);
 
 /**
  * Wraps the face detection worker.
@@ -27,9 +17,10 @@ const logLandmark = makeLogger(2000);
 class FaceDetectionWorker {
   constructor() {
     this.worker = new Worker(
-      new URL('./face-detection-worker-wgsl.js', import.meta.url),
+      workerUrlWithGates(new URL('./face-detection-worker-wgsl.js', import.meta.url)),
       { type: 'module' }
     );
+    registerWorkerForGateUpdates(this.worker);
     this.pendingResolve = null;
     this.worker.onmessage = (e) => this._onMessage(e);
   }
@@ -76,9 +67,10 @@ class FaceDetectionWorker {
 class FaceLandmarkWorker {
   constructor() {
     this.worker = new Worker(
-      new URL('./face-landmark-worker-wgsl.js', import.meta.url),
+      workerUrlWithGates(new URL('./face-landmark-worker-wgsl.js', import.meta.url)),
       { type: 'module' }
     );
+    registerWorkerForGateUpdates(this.worker);
     this.pendingResolve = null;
     this.worker.onmessage = (e) => this._onMessage(e);
   }
@@ -146,9 +138,10 @@ class FaceLandmarkWorker {
 class BlendshapeWorker {
   constructor() {
     this.worker = new Worker(
-      new URL('./face-blendshape-worker.js', import.meta.url),
+      workerUrlWithGates(new URL('./face-blendshape-worker.js', import.meta.url)),
       { type: 'module' }
     );
+    registerWorkerForGateUpdates(this.worker);
     this.pendingResolve = null;
     this.worker.onmessage = (e) => this._onMessage(e);
     this.lastBlendshapes = null; // cache latest result
@@ -216,7 +209,7 @@ export class FaceTracker {
     onStatus?.('Loading blendshape worker...');
     await this.blendshapeWorker.init(FACE_BLENDSHAPE_URL);
 
-    console.log(`All face workers ready (${this.numFaces} face slots) -- main thread is pure orchestration`);
+    log('lifecycle', `[lifecycle] All face workers ready (${this.numFaces} face slots) -- main thread is pure orchestration`);
     this.ready = true;
     onStatus?.('Ready');
   }
