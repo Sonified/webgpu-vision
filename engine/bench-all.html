@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Full Benchmark: WGSL vs ORT-WebGPU vs ORT-WASM</title></head>
+<body style="background:#111;color:#0f0;font:13px monospace;padding:16px;white-space:pre-wrap;">
+<div id="log">Full Benchmark: WGSL vs ORT-WebGPU vs ORT-WASM
+=================================================
+All 4 models, 3 engines, headless-friendly.
+
+</div>
+<script type="module">
+import { ModelRunner } from './model-runner.js';
+
+const L = document.getElementById('log');
+const log = s => { L.textContent += s + '\n'; console.log(s); };
+
+const N = 50;
+const WARMUP = 20;
+
+const MODELS = [
+  {
+    name: 'Palm Detector',
+    json: '../models/palm_detection_lite.json',
+    bin: '../models/palm_detection_lite.bin',
+    onnx: '../models/palm_detection_lite.onnx',
+    inputSize: [3, 192, 192],
+    ortInputName: 'input_1',
+    ortInputShape: [1, 192, 192, 3],
+    ortInputLayout: 'NHWC',
+  },
+  {
+    name: 'Hand Landmark',
+    json: '../models/hand_landmark_full.json',
+    bin: '../models/hand_landmark_full.bin',
+    onnx: '../models/hand_landmark_full.onnx',
+    inputSize: [3, 224, 224],
+    ortInputName: 'input_1',
+    ortInputShape: [1, 224, 224, 3],
+    ortInputLayout: 'NHWC',
+  },
+  {
+    name: 'Face Detector',
+    json: '../models/face_detector.json',
+    bin: '../models/face_detector.bin',
+    onnx: '../models/face_detector.onnx',
+    inputSize: [3, 128, 128],
+    ortInputName: 'input_1',
+    ortInputShape: [1, 128, 128, 3],
+    ortInputLayout: 'NHWC',
+  },
+  {
+    name: 'Face Landmark',
+    json: '../models/face_landmarks_detector.json',
+    bin: '../models/face_landmarks_detector.bin',
+    onnx: '../models/face_landmarks_detector.onnx',
+    inputSize: [3, 256, 256],
+    ortInputName: 'input_1',
+    ortInputShape: [1, 256, 256, 3],
+    ortInputLayout: 'NHWC',
+  },
+];
+
+const results = {};
+
+async function benchWGSL(model) {
+  const adapter = await navigator.gpu.requestAdapter();
+  const device = await adapter.requestDevice();
+
+  const graph = await (await fetch(model.json)).json();
+  const allWeights = new Float32Array(await (await fetch(model.bin)).arrayBuffer());
+
+  const W = {};
+  for (const [name, info] of Object.entries(graph.weights)) {
+    if (info.length === 0) continue;
+    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, allWeights.subarray(info.offset, info.offset + info.length));
+    W[name] = buf;
+  }
+
+  const allWeightsBuf = device.createBuffer({ size: allWeights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBuf, 0, allWeights);
+
+  const mkP = async (name) => {
+    const code = await (await fetch(`./${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P = {
+    conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
+    gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
+    add: await mkP('add'), pad_channels: await mkP('pad_channels'),
+    fused_block: await mkP('fused_block'), fused_block_tiled: await mkP('fused_block_tiled'),
+    transpose_nhwc: await mkP('transpose_nhwc'),
+  };
+
+  const [C, H, Wi] = model.inputSize;
+  const inputData = new Float32Array(C * H * Wi).fill(0.5);
+  const inputBuf = device.createBuffer({
+    size: inputData.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(inputBuf, 0, inputData);
+
+  const runner = new ModelRunner(device, P, W, allWeightsBuf);
+  await runner.compile(graph, inputBuf, allWeights);
+
+  for (let i = 0; i < WARMUP; i++) await runner.runCompiled();
+
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) await runner.runCompiled();
+  const ms = (performance.now() - t0) / N;
+
+  device.destroy();
+  return ms;
+}
+
+async function benchORTWebGPU(model) {
+  try {
+    const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = false;
+    const sess = await ort.InferenceSession.create(model.onnx, {
+      executionProviders: ['webgpu'],
+      enableMemPattern: true,
+    });
+    const inputName = sess.inputNames[0];
+    const elCount = model.ortInputShape.reduce((a, b) => a * b, 1);
+    const tensor = new ort.Tensor('float32', new Float32Array(elCount).fill(0.5), model.ortInputShape);
+    const feeds = { [inputName]: tensor };
+
+    for (let i = 0; i < WARMUP; i++) await sess.run(feeds);
+
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) await sess.run(feeds);
+    const ms = (performance.now() - t0) / N;
+
+    await sess.release();
+    return ms;
+  } catch (e) {
+    return 'ERR: ' + e.message.slice(0, 60);
+  }
+}
+
+async function benchORTWASM(model) {
+  try {
+    const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = false;
+    const sess = await ort.InferenceSession.create(model.onnx, {
+      executionProviders: ['wasm'],
+      enableMemPattern: true,
+    });
+    const inputName = sess.inputNames[0];
+    const elCount = model.ortInputShape.reduce((a, b) => a * b, 1);
+    const tensor = new ort.Tensor('float32', new Float32Array(elCount).fill(0.5), model.ortInputShape);
+    const feeds = { [inputName]: tensor };
+
+    for (let i = 0; i < WARMUP; i++) await sess.run(feeds);
+
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) await sess.run(feeds);
+    const ms = (performance.now() - t0) / N;
+
+    await sess.release();
+    return ms;
+  } catch (e) {
+    return 'ERR: ' + e.message.slice(0, 60);
+  }
+}
+
+function fmt(val) {
+  if (typeof val === 'string') return val.padStart(10);
+  return (val.toFixed(2) + 'ms').padStart(10);
+}
+
+function ratio(ours, theirs) {
+  if (typeof ours === 'string' || typeof theirs === 'string') return '     N/A';
+  const r = theirs / ours;
+  if (r >= 1) return (r.toFixed(2) + 'x').padStart(8);
+  return ((-1 / (r - 1) * 100).toFixed(0) + '% slow').padStart(8);
+}
+
+function pctFaster(ours, theirs) {
+  if (typeof ours === 'string' || typeof theirs === 'string') return '     N/A';
+  const pct = ((theirs - ours) / theirs * 100);
+  if (pct > 0) return ('+' + pct.toFixed(1) + '%').padStart(8);
+  return (pct.toFixed(1) + '%').padStart(8);
+}
+
+(async () => {
+try {
+  await import('./session-timer.mjs').then(m => m.logBanner(log)).catch(() => {});
+
+  if (!navigator.gpu) { log('No WebGPU -- cannot run WGSL or ORT-WebGPU benchmarks'); }
+
+  for (const model of MODELS) {
+    log(`\n--- ${model.name} ---`);
+    results[model.name] = {};
+
+    log(`  WGSL engine...`);
+    results[model.name].wgsl = await benchWGSL(model);
+    log(`  WGSL:       ${fmt(results[model.name].wgsl)}`);
+
+    log(`  ORT WebGPU...`);
+    results[model.name].ortGpu = await benchORTWebGPU(model);
+    log(`  ORT-WebGPU: ${fmt(results[model.name].ortGpu)}`);
+
+    log(`  ORT WASM...`);
+    results[model.name].ortWasm = await benchORTWASM(model);
+    log(`  ORT-WASM:   ${fmt(results[model.name].ortWasm)}`);
+  }
+
+  log('\n\n=================================================');
+  log('RESULTS SUMMARY');
+  log('=================================================');
+  log(`${N} iterations, ${WARMUP} warmup, M1 Max headless Chrome\n`);
+
+  const hdr = 'Model'.padEnd(18) + 'WGSL'.padStart(10) + 'ORT-GPU'.padStart(10) + 'ORT-WASM'.padStart(10) + '  vs GPU'.padStart(10) + ' vs WASM'.padStart(10);
+  log(hdr);
+  log('-'.repeat(hdr.length));
+
+  for (const model of MODELS) {
+    const r = results[model.name];
+    const row = model.name.padEnd(18)
+      + fmt(r.wgsl)
+      + fmt(r.ortGpu)
+      + fmt(r.ortWasm)
+      + pctFaster(r.wgsl, r.ortGpu)
+      + pctFaster(r.wgsl, r.ortWasm);
+    log(row);
+  }
+
+  log('\nPositive % = WGSL is faster. Negative % = WGSL is slower.');
+  log('\n=================================================');
+  log('done');
+
+} catch (e) {
+  log('ERROR: ' + e.message);
+  log(e.stack || '');
+}
+})();
+</script>
+</body>
+</html>

@@ -2,22 +2,33 @@
 
 Every approach tried, what it got us, what it cost. The ground truth.
 
-## Target: match or beat ORT-WebGPU's live demo numbers
-- ORT Hand: **8.2ms** (shared device across workers)
-- ORT Face LM: **13.0ms** (shared device across workers)
-- MediaPipe Hand: **29.3ms**
-- MediaPipe Face: **25.1ms**
+## Current standings (2026-04-21)
 
-## Headless benchmarks (single model, no contention -- the ceiling)
+**Live demo (M1 Max, Chrome, 480x360, 2 hands + face):**
 
-| Model | Baseline (naive) | After all optimizations | ORT WASM |
-|---|---|---|---|
-| Palm | 18.61ms | **13.10ms** | 27.95ms |
-| Hand | 12.67ms | **6.40ms** | 17.37ms |
-| Face det | 12.70ms | **3.34ms** | 3.05ms |
-| Face LM | 53.61ms | **8.46ms** | 13.41ms |
+| | **WGSL (ours)** | **ORT WebGPU** | **MediaPipe** | vs ORT | vs MediaPipe |
+|---|---|---|---|---|---|
+| Hand (2 hands) | **7.9ms** | 8.2ms | 29.3ms | **3.7% faster** | **3.7x faster** |
+| Face LM | **12.4ms** | 13.0ms | 25.1ms | **4.6% faster** | **2.0x faster** |
 
-These prove the engine itself is fast. The gap between headless and live is purely architecture/overhead.
+**Headless (single model, no contention -- the ceiling):**
+
+| Model | Baseline | **WGSL** | **ORT WebGPU** | **ORT WASM** | vs ORT-GPU | vs ORT-WASM |
+|---|---|---|---|---|---|---|
+| Palm | 18.61ms | **9.43ms** | 24.40ms | 28.90ms | **2.6x faster** | **3.1x faster** |
+| Hand | 12.67ms | **2.98ms** | 6.89ms | 18.02ms | **2.3x faster** | **6.0x faster** |
+| Face det | 12.70ms | **2.92ms** | 2.77ms | 3.02ms | 5% slower | parity |
+| Face LM | 53.61ms | **5.88ms** | 8.27ms | 13.86ms | **1.4x faster** | **2.4x faster** |
+
+Notes:
+- ORT WebGPU's palm detector is barely faster than its own WASM (24.4 vs 28.9ms). Their GPU EP adds almost no value on that model. We're 2.6x faster.
+- Face detector is the one model where ORT-GPU edges us out (2.77 vs 2.92ms). It's a tiny model where dispatch overhead dominates and ORT's tighter C++/WASM GPU API access wins.
+- Run with `node engine/bench-all.mjs` to reproduce. 50 iterations, 20 warmup, isolated headless Chrome.
+
+GPU compute only (timestamp queries, excludes readback/submit overhead):
+- Hand: **1.842ms** | Face LM: **5.99ms**
+
+The gap between headless and live is purely architecture/overhead (message passing, warp preprocessing, readback).
 
 ---
 
@@ -262,14 +273,14 @@ The key was NOT architecture (unified vs separate workers) -- it was **shader-le
   - Face: **12.7-13.0ms** (ORT was 13.0ms -- **WE BEAT IT**)
 - **Why it worked this time:** The unified worker had to encode 5 models before submitting, so the GPU sat idle for milliseconds. A per-model worker encodes ~66-106 pre-built dispatch steps (no allocation, no bind group creation) which takes microseconds. The submit overhead savings (~0.3-0.5ms per eliminated submit) outweigh the negligible encoding delay.
 
-## ORT BEATEN (2026-04-15)
+## ORT BEATEN (2026-04-15, extended 2026-04-20)
 
 From-scratch WGSL inference engine now **faster than Microsoft's ONNX Runtime WebGPU backend** on live demo benchmarks:
 
 | | **WGSL (live)** | **ORT-WebGPU (live)** | |
 |---|---|---|---|
-| Hand (2 hands) | **8.0ms** | 8.2ms | **2.4% faster** |
-| Face LM | **12.7ms** | 13.0ms | **2.3% faster** |
+| Hand (2 hands) | **7.9ms** | 8.2ms | **3.7% faster** |
+| Face LM | **12.4ms** | 13.0ms | **4.6% faster** |
 | MediaPipe Hand | 29.3ms | | 3.7x slower |
 | MediaPipe Face | 25.1ms | | 2.0x slower |
 
@@ -303,11 +314,71 @@ Total session improvement: **Hand 15.8% faster, Face 3.8% faster.**
 - **Key insight:** OC tiling trades input bandwidth for weight bandwidth. On M1 with L2 cache, input reads are already cheap (cache hits). The trade only wins when channels are small enough that the extra weight reads don't dominate. For MobileNetV2's 672-channel layers, they do.
 - **Status:** Reverted. Single OC per thread is optimal for the hand model (our primary optimization target). The 2-OC approach would likely help on discrete GPUs (NVIDIA, AMD) where input reads are real cache misses, and should be retested on non-Apple hardware.
 
+### 18. GEMM parallel reduction + vec4 (SHIPPED)
+- **What:** Two-path GEMM shader: small M (<=4) uses one-thread-per-output with vec4 dot. Large M uses 64-thread parallel reduction per output (each thread handles K/64 chunk, tree reduction via shared memory).
+- **Result:** GEMM dispatches faster across all models. Contributes to overall gains below.
+- **Cost:** None. Both paths are branchless at dispatch time (selected by workgroup dimensions).
+
+### 19. Conv2D 1x1 double-unrolled vec4 + adaptive oc_tile (SHIPPED)
+- **What:** 1x1 convolutions now process 4 output channels per thread (oc_tile=4) with double-unrolled vec4 inner loop (8 input channels per iteration). Adaptive gating: `oc_tile = iC <= 64 ? 4 : 1` prevents cache thrashing on large-channel layers (672-to-112 was regressing 2x with oc_tile=4).
+- **Result:** Significant 1x1 speedup for small-channel layers. Large-channel layers stay at oc_tile=1 to avoid regression.
+- **Key insight:** oc_tile=4 wins when weight working set fits in L2 (small iC). At iC=672, 4 output channels means 4x the weight reads per thread, thrashing the cache.
+
+### 20. Conv2D unrolled 2x2 general path (SHIPPED -- 52% face conv speedup)
+- **What:** Face landmark model uses 2x2 strided convolutions for downsampling (not depthwise, not 1x1). Added a manually unrolled 2x2 kernel path between the 1x1 and generic general conv paths. Four explicit multiply-adds with bounds checks instead of a double loop.
+- **Result:** Face LM conv_general category: **1.637ms -> 0.787ms (52% faster)**. These 2x2 convs were the #1 hotspot in the face model.
+- **Cost:** None. Falls through to generic path for other kernel sizes.
+
+### 21. Fused block tiled variant for small spatial (SHIPPED -- separate pipeline)
+- **What:** Created `fused_block_tiled.wgsl` with `var<workgroup> tile: array<f32, 400>` for cooperative input tile loading. Used only when output spatial <= 8x8 (selected in model-runner.js). Unrolled 3x3 and 5x5 DW kernels reading from shared memory.
+- **Why a separate shader:** Declaring `var<workgroup>` in a shader reduces GPU occupancy for ALL dispatches using that pipeline, even if the shared memory branch isn't taken. A single shader with conditional tiling caused hand model to regress from 7.6ms to 10.4ms. Two separate pipelines let large-spatial dispatches use the occupancy-friendly fused_block.wgsl.
+- **Result:** Face LM fused blocks at 8x8: 7% faster. 4x4: 19% faster. 2x2: 20% faster.
+- **Gotcha:** Uniform control flow required -- all 64 threads must hit `workgroupBarrier()` regardless of bounds. Uses `in_bounds` flag instead of early return.
+
+### Session of 2026-04-20: shader compute round 2
+
+Starting point: Hand 8.0ms, Face 12.7ms (already beating ORT).
+
+1. **GEMM parallel reduction** (#18)
+2. **1x1 double-unrolled vec4 + adaptive oc_tile** (#19)
+3. **2x2 general conv unrolling** (#20): face conv 52% faster
+4. **Fused block tiled variant** (#21): face small-spatial fused blocks 7-20% faster
+
+**Updated live benchmarks (M1 Max, Chrome, 480x360, 2 hands + face):**
+
+| | **WGSL (live)** | **ORT-WebGPU (live)** | |
+|---|---|---|---|
+| Hand (2 hands) | **7.9ms** | 8.2ms | **3.7% faster** |
+| Face LM | **12.4ms** | 13.0ms | **4.6% faster** |
+
+Total session improvement: **Hand 1.3% faster, Face 2.4% faster** (on top of already beating ORT).
+
+GPU profiler numbers (headless, per-dispatch timing):
+- Hand GPU compute: **1.842ms** (down from 3.115ms baseline = 41% faster across all shader sessions)
+- Face LM GPU compute: **5.99ms** (down from 7.12ms = 16% faster this session)
+
+### 22. OC-tiled fused block -- 4 output channels sharing DW compute (REJECTED)
+- **What:** New shader `fused_block_oc4.wgsl` with workgroup_size(8, 8, 4) = 256 threads. 4 output channels share one workgroup, cooperatively load the DW input tile, z=0 threads compute DW once and broadcast via `dw_shared` array, all 4 oc threads accumulate their own 1x1 weight. Eliminates 3/4 redundant DW compute across output channels.
+- **Hypothesis:** Face detector's 96ch 8x8 blocks (38% of compute) redundantly compute DW conv 96 times. With oc_tile=4, only 24 groups compute DW, sharing across 4 output channels each.
+- **Results (face detector, per-dispatch GPU timing):**
+  - 96ch 8x8: 274us -> 164us (**40% faster**) -- the target blocks improved significantly
+  - 48-64ch 16x16: slight improvement (92->80, 113->93us)
+  - 72-88ch 16x16: **30-32% SLOWER** (131->171, 146->193, 163->212us)
+  - 24-28ch 64x64: **21-32% SLOWER** (147->178, 176->233us)
+  - Overall: 2.93ms -> 3.50ms (**19% regression**)
+- **Also tried:** Relaxing tiling threshold (oH<=16, iC<=64) for 16x16 blocks. 48ch 16x16 regressed 57% (92->144us). M1 cache wins at these spatial sizes.
+- **Why it failed:** Three barriers per input channel (tile load, DW broadcast, pre-next-load sync) dominate for high-channel or large-spatial blocks. 256-thread workgroups reduce occupancy vs 64-thread fused_block. The DW savings only outweigh barrier cost for the specific case of small spatial + high channels (96ch 8x8).
+- **Key insight:** This is the fourth shared-memory strategy defeated by M1's L2 cache (after #10, #11, #14). The pattern is definitive on Apple Silicon. OC-sharing of DW compute helps the 96ch 8x8 blocks in isolation, but the global occupancy and barrier costs make it a net loss. The face detector's 0.15ms gap to ORT is in submit/readback overhead, not GPU compute.
+- **Status:** Reverted. Shader kept at `fused_block_oc4.wgsl` for reference. May help on discrete GPUs (NVIDIA/AMD) where memory latency is higher and shared memory provides more benefit.
+
+---
+
 ### What we learned
 - Architecture experiments (unified worker, batched submit, warp folding) gave ~10-20% improvements at best
-- Shader compute optimizations (shared memory, vec4) gave **2x** improvements
+- Shader compute optimizations (shared memory, vec4, unrolling, fusion) gave **2x** improvements
 - The GPU driver and L2 cache on M1 are smart enough that explicit data sharing (shared memory for weights, unified device) often hurts more than helps
 - The M1 handles 5 separate GPU devices efficiently -- the "waste" of separate devices is actually free parallelism
 - When in doubt, make the shader itself faster, not the orchestration around it
+- **Shared memory occupancy penalty is real:** declaring `var<workgroup>` reduces max concurrent workgroups even when the memory isn't used. Split into separate pipelines to avoid penalizing dispatches that don't need shared memory.
 - **M1 L2 cache defeats three separate tiling/sharing strategies:** weight tiling (#11), output channel tiling (#14), and the inverted residual fusion (#10). All three attempt to avoid reads that are already cheap. The pattern is consistent: on Apple Silicon with large unified-memory L2, the overhead of the sharing mechanism (barriers, registers, branches) exceeds the bandwidth savings. This may NOT hold on discrete GPUs (NVIDIA, AMD) where memory latency is higher and L2 is smaller -- these optimizations should be retested if targeting non-Apple hardware.
 - **Benchmark methodology matters enormously.** GPU pipelines need 15-20 warmup iterations (not 5) to stabilize. Single-batch measurements can vary 20%+ between runs. Always use multiple batches (5x50) and take the median. Always test in isolated browser instances (sequential model tests in the same browser cause resource contention). Initial "30% regression" from OC tiling was entirely warmup noise -- real difference was 6-15% depending on model.

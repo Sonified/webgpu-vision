@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Face Det Dispatch Profiler</title></head>
+<body style="background:#111;color:#0f0;font:13px monospace;padding:16px;white-space:pre-wrap;">
+<div id="log">Face Detector Dispatch Profiler
+================================
+Per-dispatch GPU timing for face detection model.
+Uses timestamp-query if available, CPU fallback otherwise.
+
+</div>
+<script type="module">
+import { ModelRunner } from './model-runner.js';
+
+const L = document.getElementById('log');
+const log = s => { L.textContent += s + '\n'; console.log(s); };
+
+(async () => {
+try {
+  await import('./session-timer.mjs').then(m => m.logBanner(log)).catch(() => {});
+  if (!navigator.gpu) { log('No WebGPU'); return; }
+  const adapter = await navigator.gpu.requestAdapter();
+
+  const features = [];
+  if (adapter.features.has('timestamp-query')) {
+    features.push('timestamp-query');
+    log('timestamp-query: AVAILABLE (GPU-native timing)');
+  } else {
+    log('timestamp-query: NOT AVAILABLE (using CPU fallback -- less precise)');
+  }
+  const device = await adapter.requestDevice({ requiredFeatures: features });
+  log('WebGPU ready\n');
+
+  log('Loading face_detector...');
+  const graph = await (await fetch('../models/face_detector.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/face_detector.bin')).arrayBuffer());
+  log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
+
+  const W = {};
+  for (const [name, info] of Object.entries(graph.weights)) {
+    if (info.length === 0) continue;
+    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, allWeights.subarray(info.offset, info.offset + info.length));
+    W[name] = buf;
+  }
+
+  const mkPipeline = async (name) => {
+    const code = await (await fetch(`./${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P = {
+    conv2d: await mkPipeline('conv2d'),
+    maxpool: await mkPipeline('maxpool'),
+    resize: await mkPipeline('resize'),
+    gemm: await mkPipeline('gemm'),
+    global_avg_pool: await mkPipeline('global_avg_pool'),
+    add: await mkPipeline('add'),
+    pad_channels: await mkPipeline('pad_channels'),
+    fused_block: await mkPipeline('fused_block'),
+    fused_block_tiled: await mkPipeline('fused_block_tiled'),
+    transpose_nhwc: await mkPipeline('transpose_nhwc'),
+  };
+  log('Shaders compiled');
+
+  const allWeightsBuf = device.createBuffer({ size: allWeights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBuf, 0, allWeights);
+
+  const H = 128, Wi = 128;
+  const inputNCHW = new Float32Array(3 * H * Wi).fill(0.5);
+  const inputBuf = device.createBuffer({
+    size: inputNCHW.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(inputBuf, 0, inputNCHW);
+
+  const runner = new ModelRunner(device, P, W, allWeightsBuf);
+
+  log('\nCompiling model...');
+  await runner.compile(graph, inputBuf, allWeights);
+  log(`Compiled: ${runner._steps.length} GPU steps`);
+
+  log('\n--- Overall benchmark (baseline) ---');
+  for (let i = 0; i < 20; i++) await runner.runCompiled();
+  const N = 50;
+  const bt0 = performance.now();
+  for (let i = 0; i < N; i++) await runner.runCompiled();
+  const overallMs = (performance.now() - bt0) / N;
+  log(`Overall: ${overallMs.toFixed(2)} ms/inference (${N} iterations)\n`);
+
+  log('--- Per-dispatch profiling (20 iterations) ---\n');
+  const profile = await runner.profileCompiled(20);
+
+  log('=== BY CATEGORY ===');
+  const catEntries = Object.entries(profile.categories).sort((a, b) => b[1].totalNs - a[1].totalNs);
+  const barWidth = 40;
+  for (const [cat, data] of catEntries) {
+    const pct = (data.totalNs / profile.totalNs * 100);
+    const bar = '#'.repeat(Math.round(pct / 100 * barWidth));
+    const ms = (data.totalNs / 1e6).toFixed(3);
+    log(`${cat.padEnd(20)} ${data.count.toString().padStart(3)}x  ${ms.padStart(8)}ms  ${pct.toFixed(1).padStart(5)}%  ${bar}`);
+  }
+  log(`${'TOTAL'.padEnd(20)}       ${profile.totalMs.toFixed(3).padStart(8)}ms`);
+  log(`${'Overhead'.padEnd(20)}       ${(overallMs - profile.totalMs).toFixed(3).padStart(8)}ms  (submit + readback)\n`);
+
+  log('=== TOP 20 DISPATCHES ===');
+  for (const r of profile.dispatches.slice(0, 20)) {
+    const pct = (r.medianNs / profile.totalNs * 100);
+    const bar = '#'.repeat(Math.round(pct / 100 * barWidth));
+    log(`#${r.idx.toString().padStart(2)}  ${r.label.padEnd(35)} ${r.dims.padEnd(12)} ${r.medianUs.toFixed(1).padStart(8)}us  ${pct.toFixed(1).padStart(5)}%  ${bar}`);
+  }
+
+  log('\n=== ALL DISPATCHES (execution order) ===');
+  const byOrder = [...profile.dispatches].sort((a, b) => a.idx - b.idx);
+  for (const r of byOrder) {
+    const pct = (r.medianNs / profile.totalNs * 100);
+    log(`#${r.idx.toString().padStart(2)}  ${r.label.padEnd(35)} ${r.dims.padEnd(12)} ${r.medianUs.toFixed(1).padStart(8)}us  ${pct.toFixed(1).padStart(5)}%`);
+  }
+
+  log('\n================================');
+  log('done');
+} catch (e) {
+  log('ERROR: ' + e.message);
+  log(e.stack || '');
+}
+})();
+</script>
+</body>
+</html>

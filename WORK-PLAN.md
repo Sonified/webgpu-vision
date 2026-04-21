@@ -590,14 +590,16 @@ Architecture: separate workers (5 GPU devices) with optimized shaders outperform
 | Hand | **9.5ms** | 8.2ms | 29.3ms | 16% slower | **3.1x faster** |
 | Face LM | **13.2ms** | 13.0ms | 25.1ms | **parity** | **1.9x faster** |
 
-**Headless benchmarks (the compute ceiling):**
+**Headless benchmarks (the compute ceiling, 2026-04-21):**
 
-| Model | WGSL compiled | ORT WASM | vs ORT |
-|---|---|---|---|
-| Palm | 9.75ms | 27.83ms | **2.9x faster** |
-| Hand | 3.20ms | 17.45ms | **5.5x faster** |
-| Face det | 3.11ms | 3.10ms | parity |
-| Face LM | 7.02ms | 13.58ms | **1.9x faster** |
+| Model | **WGSL** | **ORT WebGPU** | **ORT WASM** | vs ORT-GPU | vs ORT-WASM |
+|---|---|---|---|---|---|
+| Palm | **9.43ms** | 24.40ms | 28.90ms | **2.6x faster** | **3.1x faster** |
+| Hand | **2.98ms** | 6.89ms | 18.02ms | **2.3x faster** | **6.0x faster** |
+| Face det | **2.92ms** | 2.77ms | 3.02ms | 5% slower | parity |
+| Face LM | **5.88ms** | 8.27ms | 13.86ms | **1.4x faster** | **2.4x faster** |
+
+Run `node engine/bench-all.mjs` to reproduce (50 iterations, 20 warmup, headless Chrome).
 
 **UPDATE (2026-04-15): ORT BEATEN.** Four optimizations in one session:
 1. Cached warp texture + bind group (eliminated per-frame GPU allocations)
@@ -605,12 +607,18 @@ Architecture: separate workers (5 GPU devices) with optimized shaders outperform
 3. VideoFrame zero-copy transfer (0.02ms vs 0.5ms per createImageBitmap call)
 4. Merged warp + inference into single GPU submit (one submit per worker per frame)
 
-**New live benchmarks (M1 Max, Chrome, 480x360, 2 hands + face):**
+**UPDATE (2026-04-20): Shader compute round 2.** Four more optimizations:
+1. GEMM parallel reduction + vec4 (64-thread shared memory reduction for large matrices)
+2. Conv2D 1x1 double-unrolled vec4 + adaptive oc_tile (oc_tile=4 for small channels, 1 for large)
+3. Conv2D unrolled 2x2 general path (52% faster face landmark strided downsamples)
+4. Fused block tiled variant (separate pipeline with shared memory for spatial <= 8x8)
+
+**Current live benchmarks (M1 Max, Chrome, 480x360, 2 hands + face):**
 
 | | WGSL | ORT-WebGPU | MediaPipe | vs ORT | vs MediaPipe |
 |---|---|---|---|---|---|
-| Hand | **8.0ms** | 8.2ms | 29.3ms | **2.4% faster** | **3.7x faster** |
-| Face LM | **12.7ms** | 13.0ms | 25.1ms | **2.3% faster** | **2.0x faster** |
+| Hand | **7.9ms** | 8.2ms | 29.3ms | **3.7% faster** | **3.7x faster** |
+| Face LM | **12.4ms** | 13.0ms | 25.1ms | **4.6% faster** | **2.0x faster** |
 
 Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on iPhone.
 
