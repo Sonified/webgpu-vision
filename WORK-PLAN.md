@@ -372,6 +372,17 @@ Fix goes in `pipeline.js`, not the demo.
 - Handedness swap was removed -- keep it removed, it caused visual flips
 - Edge rejection was reverted -- correct, don't shrink play area
 
+### Known issue: hand identity can swap when hands fully overlap
+
+WebGPU Vision hand tracking (2026-04-17) is at parity with or better than MediaPipe's demo behavior in most scenarios, but when two hands overlap heavily (palms together / one hand directly behind the other), one slot occasionally "swallows" the other -- both slots briefly track the same physical hand before the dedup system recovers.
+
+Root cause: our landmark model is given a per-slot ROI crop. When one slot's 2x-expanded ROI covers both hands, the model returns landmarks for whichever hand is more prominent, so both slots converge. The pipeline now handles this with:
+- **Centroid-based identity tracking** (palm of 4 MCP+wrist points) -- hands that just *approach* each other don't swap
+- **Duplicate detection** (tunable threshold, default 25px, slider in drawer) -- catches convergence and drops the losing slot so palm detection can re-establish
+- **Palm re-anchor during overlap** (<80px centroid distance) -- fires palm detection every frame while hands overlap and re-anchors each slot's ROI to the matching palm-detected hand
+
+Still imperfect for full overlap cases. MediaPipe's pipeline has additional tracking-state logic (likely cross-frame assignment with Hungarian-style cost matrices plus internal smoothing) that we haven't replicated. Our landmark model is the same as theirs (Google's hand_landmarker) so the gap is purely in the orchestration layer. Revisit when centroid-tracking proves insufficient in production -- for now, document and ship.
+
 ### Known issue: intermittent startup stall (20-30 seconds)
 
 Observed 2026-04-15. Demo loads, all workers report ready, camera goes live, face detection fires once and assigns slot 0, palm detection fires once (5 detections, assigns one hand), then **everything stalls for 20-30 seconds**. No FRAME RATE logs, no BENCH logs, tracking stuck on `_,_`. Eventually recovers with a **22x oversampling burst** (673 hand samples, 668 face samples in one report) then settles to normal 30fps.
@@ -604,9 +615,13 @@ Architecture: separate workers (5 GPU devices) with optimized shaders outperform
 Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on iPhone.
 
 **What's left for Step 7: Ship + Demo Polish**
-- **Hand identity tracking** (NEXT): stable slot assignment across hand exits/entries. See "Hand identity tracking" section above. Fix belongs in demo's `handleHandResult()`, not pipeline.
-- **Z-axis depth**: stabilize hand size and convert z-depth into z-movement in video space
-- Hand parallax compensation using true z-depth
+- **Hand identity tracking** (DONE 2026-04-17): pipeline now uses palm-centroid identity tracking, duplicate detection with tunable slider in the drawer, and palm re-anchor while hands overlap. At parity with or better than MediaPipe in most cases. Full overlap still imperfect -- see "hand identity can swap" known issue.
+- **SpellARia Motion Signature Recorder (CRITICAL PATH)**: build the data-collection tool NOW, start collecting a labeled dataset of reversals vs terminations. This is the path to the prediction classifier that eliminates perceived latency. Data collection is the long pole -- wall-clock time spent physically performing motions. See "CRITICAL PATH: SpellARia Motion Signature Recorder" section below.
+- **RTMPose hand-only evaluation**: swap in RTMPose's hand-only ONNX and A/B it vs MediaPipe via ORT Web. If SimCC-based keypoint localization is meaningfully more accurate on extreme poses (needed for Spellaria sign-language gestures), plumb through our WGSL engine. Can run in parallel with recorder work. See "Next session: try the RTMPose hand-only model" section below.
+- **Z-axis depth via landmark spread**: derive depth from pixel distance between wrist and middle-finger MCP. See "Z-depth via landmark spread" section below for the full design.
+- Hand parallax compensation using the derived z-depth.
+- **Output adapter layer + OSC pipeline**: pluggable outputs (OSC, MIDI, WebSocket, BroadcastChannel) so hand/gesture events can drive other software and devices. See "Future: output adapters + OSC pipeline" section below.
+- **PFLD face tracking alternative**: Apache 2.0, ~98 2D keypoints, lightweight and fast. Second face backend for demos/users who don't need MediaPipe's full 478-point mesh + blendshapes. Not an upgrade path (MediaPipe face is already excellent); purely a library-flexibility demo. See "Face tracking alternative: PFLD" section below.
 - Delete `vendor/onnxruntime-web/` (23MB -- still needed for blendshape worker)
 - Extract face blendshape model to WGSL (then vendor/ can be fully deleted)
 - Push to GitHub Pages
@@ -661,6 +676,412 @@ Other options surveyed (2026-04-12):
 - **MMPose (general)**: research toolkit, many models, Apache 2.0. RTMPose is their production-grade export.
 
 None of these run on WebGPU today. They all assume CUDA/PyTorch. Our engine is the thing that makes them browser-runnable. Build the engine first on MediaPipe models, explore upgrades after.
+
+### Next session: try the RTMPose hand-only model (prioritized ahead of z-depth)
+
+Session 2026-04-17 ran extensive prayer-hands debugging and concluded our MediaPipe hand landmark model has a fundamental limitation: when two hands overlap, the model's per-slot ROI can cover both hands, and the model picks whichever is more prominent. MediaPipe's own JS SDK handles this better because they have more sophisticated tracking state; we've replicated what we can at the pipeline level (centroid identity tracking, duplicate detection, palm re-anchor during overlap) but the landmark model itself remains the weak link.
+
+**Plan:** swap in the RTMPose hand-only model before tackling z-depth. The hypothesis is that RTMPose's SimCC coordinate-classification approach may localize keypoints more accurately on non-trivial hand poses (curled fingers, extreme angles, occluded fingertips) than MediaPipe's regression approach. Those are exactly the poses that matter for sign-language-style gestures in Spellaria.
+
+**What to do (experiment, not a full integration):**
+1. Download a pre-exported RTMPose hand-only ONNX model via [rtmlib](https://github.com/Tau-J/rtmlib) or [OpenMMLab Deploee](https://platform.openmmlab.com/deploee/). Pick `rtmpose-m-hand` or similar -- a 21-keypoint hand-only variant (not whole-body).
+2. Estimated size: ~15-20MB for the hand-only variant (vs ~4MB for MediaPipe's hand_landmark_full). Bigger, but within reason for a web demo with caching.
+3. Run it through ORT Web + WebGPU first (not our engine) for a quick A/B vs MediaPipe on the same test video. No engine plumbing until we've confirmed the model is actually better for our use case.
+4. If accuracy/robustness is meaningfully better, then: dump the ONNX graph, compile through our ModelRunner, write any missing ops, wire through `landmark-worker-wgsl.js`.
+
+**Architectural note**: this would also demonstrate the library's flexibility -- same WebGPU engine runs both models. Users could pick the backend that fits their task. Both Apache 2.0, both commercially shippable.
+
+**Mix-and-match is fine** -- face and hand pipelines are fully independent in our architecture (separate workers, separate ROIs, separate event streams). Only `landmark-worker-wgsl.js` changes for a hand-model swap; face stays untouched. The demo can offer "Face: MediaPipe, Hands: RTMPose" as a combo (or any other combination) by just selecting different model URLs per pipeline.
+
+**Pipeline shape with RTMPose**: RTMPose's hand-only variant expects a pre-cropped hand image -- it does NOT include a detection stage. MediaPipe's palm detector is already doing a great job finding where hands are, so keep it. The stack becomes:
+- **MediaPipe palm detector** (unchanged) -> finds hand location / generates initial ROI
+- **RTMPose hand landmarks** (new) -> 21 keypoints from the cropped ROI
+- Tracking loop (landmarks -> next-frame ROI) stays the same
+
+So you get MediaPipe's proven detector + RTMPose's (hypothetically more accurate) landmark localization.
+
+**Decoding note**: RTMPose outputs SimCC dual heatmaps (one per axis), not regressed coordinates. The landmark decode in `landmark-worker-wgsl.js` needs argmax-with-softargmax refinement over the heatmap to extract keypoint positions. More post-processing than MediaPipe's "reshape 63 floats into 21x3", but the math is well-documented in the RTMPose paper.
+
+**What RTMPose does NOT give us:**
+- Sign-language classification (that's a separate stage built on top of pose keypoints -- small MLP for static signs, LSTM/transformer for dynamic signs. Would need custom training on Spellaria's gesture vocabulary)
+- Z-depth (RTMPose hand-only is 2D; RTMPose3D is whole-body and ~200MB+). For z we should derive from landmark spread (see below).
+
+### Face tracking alternative: PFLD (Practical Facial Landmark Detector)
+
+Lower priority than the RTMPose hand swap, but worth evaluating as a second face-tracking backend.
+
+**Why consider it:** MediaPipe face (current, Apache 2.0, 478 3D points + 52 blendshapes) is genuinely hard to beat in the open-license tier -- face tracking has NOT been a pain point in any of our debugging sessions. PFLD (Practical Facial Landmark Detector) is Apache 2.0, lightweight, and fast, but only outputs ~98 2D points with no blendshapes. It's not an upgrade for Spellaria's face feature set, but it's a good candidate for a "fast minimal face tracker" backend for users who don't need the full face mesh.
+
+**What PFLD gives us:**
+- Apache 2.0 license, commercial OK
+- ~98 2D landmarks (versus MediaPipe's 478)
+- Very small model, very fast inference
+- No blendshapes / expression coefficients
+- 2D only, no z depth
+
+**Use case:** demos or integrations where the consumer wants a lightweight face bounding-landmark tracker rather than the full mesh + blendshape pipeline. Could ship as a toggle in the same library: "Face: MediaPipe (full mesh + expressions)" or "Face: PFLD (fast, 98 points, 2D only)".
+
+**Priority:** after RTMPose hand evaluation + z-depth + output adapters. This is a nice-to-have for demonstrating library flexibility, not a Spellaria blocker.
+
+**Evaluation plan (when we get to it):**
+1. Find a pre-exported PFLD ONNX model (several exist on GitHub / HuggingFace under Apache 2.0)
+2. A/B test via ORT Web before plumbing through our WGSL engine (same approach as RTMPose)
+3. If it runs and looks reasonable, wire through a `face-landmark-worker-wgsl.js` variant. Face detection stage (BlazeFace) stays the same -- PFLD expects a pre-cropped face.
+4. Expose as a dropdown in the hub / ball-toss demo.
+
+**Landscape of face-tracking models surveyed (all commercial-license-checked, 2026-04-17):**
+
+| Model | License | Keypoints | Notes |
+|---|---|---|---|
+| MediaPipe Face Landmarker (current) | Apache 2.0 | 478 3D + 52 blendshapes | Best-in-class open-license, shipping |
+| RTMW (whole-body) | Apache 2.0 | 133 total (face subset) | Face coupled to whole-body, big model |
+| PFLD | Apache 2.0 | ~98 2D | Fast + small, no blendshapes |
+| dlib shape_predictor_68 | Boost Software License | 68 2D | Old (2014), non-NN, poor accuracy |
+| InsightFace (trap) | Code MIT, weights non-commercial | various | Commonly mistaken as commercial-OK; it is NOT |
+| OpenFace | Academic-only | -- | Dead end for product |
+
+### Z-depth via landmark spread (planned approach, not yet implemented)
+
+When the time comes for real z-depth:
+
+Rather than use the landmark model's noisy per-frame z regression, derive depth from the pixel distance between two anatomically-rigid landmarks. Wrist (idx 0) to middle-finger MCP (idx 9) is the ideal pair -- rigid palm bone structure, doesn't change when fingers flex.
+
+```js
+// Calibrate once: capture REFERENCE_PX_DIST at a known z (e.g. arm's length)
+const dx = (landmarks[0].x - landmarks[9].x) * vw;
+const dy = (landmarks[0].y - landmarks[9].y) * vh;
+const pxDist = Math.hypot(dx, dy);
+const depthNorm = REFERENCE_PX_DIST / pxDist;  // 1.0 = neutral, >1 = farther, <1 = closer
+```
+
+**Why this beats the model's z output:** landmark 2D coords are already noise-filtered (by our One Euro filter), so the derived depth is temporally smooth. Model z is regressed per-frame, noisy, and trained on synthetic depth data of varying quality.
+
+**Caveats:**
+- Out-of-plane rotation (palm tilting toward/away from camera face-on vs edge-on) changes the spread without real depth change. Acceptable for ball-toss where the hand is mostly approaching/retreating forward.
+- Hand size varies by person. Auto-calibrate on first clean detection.
+
+For ball-toss specifically, throw velocity can be derived from rate-of-change of the spread metric -- gives a physically meaningful "push toward camera" gesture.
+
+### Future: output adapters + OSC pipeline
+
+The library currently emits landmark/blendshape/gesture events in-process (consumed by the same page's JS). A natural extension: **pluggable output adapters** that let consumers route events to other processes, devices, or pages. Sketched but not built.
+
+**Why it matters:** demos and installations are where hand tracking shines beyond a single game. "Point at the camera and trigger a sound in Ableton" is the pitch. Creative-coding community (TouchDesigner, Max/MSP, Wekinator users) expects this kind of I/O.
+
+**Architecture:**
+
+```js
+const pipeline = new HandTracker();
+const osc = new OSCOutput({ transport: 'websocket', url: 'ws://localhost:8080' });
+pipeline.onGesture((g) => osc.send(`/spell/${g.name}`, g.confidence));
+```
+
+Library stays focused on inference. The adapter layer is optional; import only what you need.
+
+**Browser constraint:** browsers can't send raw UDP (what OSC traditionally uses). Three viable routes:
+
+1. **WebSocket → UDP relay**: tiny Node or Python script that accepts WebSockets and forwards as UDP OSC. Standard practice in browser-to-DAW integrations. Relay can run on the same machine or on a Pi on the local network. Phones connect via WebSocket. Latency: ~1-2ms locally.
+2. **Direct WebSocket "pseudo-OSC"**: when both ends are browsers (another tab, phone's browser), skip UDP entirely. Serialize OSC binary over WebSocket. `osc-js` handles this natively.
+3. **BroadcastChannel** for same-origin tabs. Zero config, 0ms latency, perfect for "trigger something on another page on this device".
+
+**Recommended implementation order (when the time comes):**
+1. Build a minimal `EventBus` in the library: `pipeline.on('handLandmarks', fn)`, `pipeline.on('gesture', fn)`, etc. Internal-only, no transport.
+2. Define the `OutputAdapter` interface: `{ send(event, ...args) }`.
+3. Implement adapters as separate, optional imports: `OSCOutput`, `BroadcastChannelOutput`, `MIDIOutput` (Web MIDI API), `WebhookOutput` (POST to URL), `PostMessageOutput` (iframes / other tabs).
+4. Ship a reference UDP relay in `tools/osc-relay/` -- ~30 lines of Node using `dgram` + `ws`. Documented in README.
+5. Demo: the ball-toss shows hand gestures triggering OSC to a hypothetical "DAW at localhost:8080". Optional, disabled by default.
+
+**Library size cost**: `osc-js` is ~20KB. Only loaded when the OSC adapter is imported. Core library unaffected.
+
+**Not a near-term priority**, but worth reserving the architectural space. When implementing, make sure the EventBus is designed such that adapters are truly plug-in (no core changes needed to add a new transport).
+
+**Priority**: after RTMPose evaluation + z-depth. These are all research/exploration tasks that don't block shipping the core library.
+
+### Very-future exploration: input adapters (Leap Motion, WebXR hand tracking)
+
+Mirror of the output adapter layer: let the library accept hand/face data from sources OTHER than a webcam + our WGSL engine. Same event shape downstream -- gesture classifiers, z-depth derivation, OSC output all work regardless of where the landmarks came from.
+
+**Candidates:**
+
+- **Leap Motion / Ultraleap**: dedicated IR hand-tracking hardware (~$130). Orders of magnitude more accurate than any camera-based solution -- active infrared, purpose-built for hands, ~120fps, zero occlusion issues when hands overlap (the IR sees through). Browser integration via Ultraleap's legacy `leapjs` WebSocket daemon (`ws://localhost:6437`) which is still supported even in the newer Gemini/Hyperion SDKs. Desktop-only, requires installed drivers. Great as a "pro/installation mode" for demos, live performance, or Spellaria's high-end version.
+- **WebXR hand tracking**: Meta Quest 3, Apple Vision Pro, and other headsets expose 25-joint hand skeletons via the [WebXR Hand Input API](https://immersive-web.github.io/webxr-hand-input/). Completely standard web API -- just listen for hand input on the XRSession. No driver install. Works inside the headset's browser. For any immersive VR/AR demo this is the right source.
+- **External MediaPipe via bridge**: running MediaPipe's C++/Python pipeline on a beefier host and streaming landmarks to the browser via WebSocket. Useful for offloading compute or using models too large for browser inference.
+
+**Architectural fit:**
+
+```js
+// camera-based (default, current)
+const pipeline = new HandTracker();
+
+// Leap Motion
+const pipeline = new LeapHandTracker({ wsUrl: 'ws://localhost:6437' });
+
+// WebXR (inside a VR/AR session)
+const pipeline = new WebXRHandTracker(xrSession);
+```
+
+All three emit the same landmark event shape. Downstream consumers (gesture classification, z-depth estimation, OSC output, game code) never know or care which adapter produced the data. This is the same pluggable pattern as the output adapters.
+
+**Why this matters long-term:** the library stops being "a WebGPU hand tracker" and becomes "a unified hand/pose pipeline for the browser, with multiple input and output backends." The WebGPU engine is the flagship backend (free, universal, runs anywhere), but the library's real value is the event pipeline and the classifier/adapter infrastructure built around it.
+
+**Priority:** very-future exploration. No work until core library + RTMPose + z-depth + output adapters are done. Not on any near-term path.
+
+### CRITICAL PATH: SpellARia Motion Signature Recorder
+
+**This is the path to eliminating perceived latency in SpellARia.** Camera-plus-inference adds inherent lag to hand tracking -- by the time landmarks are rendered, the hand has already moved. A prediction layer can compensate by extrapolating forward, but naive prediction overshoots at motion edges (hand reverses direction, or stops). The current workaround -- backing off prediction whenever velocity drops -- trades responsiveness everywhere to avoid overshoot at edges.
+
+The recorder exists to collect labeled data that lets us train a classifier to distinguish the kinematic signature of a REVERSAL (hand is about to change direction, keep predicting through zero-velocity) from a TERMINATION (hand is stopping, pull prediction back). With that classifier, SpellARia gets full-strength prediction during continuous motion AND correct behavior at motion edges -- the best of both worlds, and substantially lower perceived latency than MediaPipe or any competitor.
+
+**This is why SpellARia can feel better than anything else on the market.** Not a research side project. It is the latency story.
+
+#### Purpose
+Collect labeled kinematic data to test whether reversals and terminations have distinguishable signatures in the frames leading up to zero-velocity. If they do, we can build a classifier that gates prediction behavior: maintain prediction through a detected reversal, pull prediction back on a detected termination. This would give SpellARia correct behavior at motion edges rather than forcing the current tradeoff of backing off prediction whenever velocity drops.
+
+#### Protocol
+- Hold R while performing a reversal. Release when done.
+- Hold T while performing a termination. Release when done.
+- Trial saved on keyup with label.
+
+Keyup timing is not precision-critical. Alignment happens offline at analysis time against kinematic events in the data (zero-velocity for T, first-derivative sign change for R). The keyup just labels the trial.
+
+#### Per-sample record
+```javascript
+{
+  t: 127.3,
+  keypoints: {
+    wrist:     { x, y, z, confidence },
+    palm:      { x, y, z, confidence },
+    indexTip:  { x, y, z, confidence },
+    middleTip: { x, y, z, confidence },
+  },
+  dropped: false,
+}
+```
+
+Multiple keypoints because the biomechanical signature may show more cleanly in one than another. Wrist captures bulk arm motion with less noise. Fingertip captures fine motion but has its own articulation dynamics. Recording all of them is free at collection time and lets analysis explore which channel carries the signal best. `confidence` travels with each keypoint so analysis can reject low-quality samples without re-running the tracker.
+
+`dropped: true` for frames where the tracker returned nothing. Preserves the true temporal structure -- a silently-omitted frame would distort derivative computations during analysis.
+
+#### Per-trial record
+```javascript
+{
+  trialId: "reversal_1729800000000_a3f",
+  label: "reversal" | "termination",
+  keydownTime: 1729800000000,
+  keyupTime:   1729800000847,
+  sessionId: "session_1729799000000_xyz",
+  metadata: {
+    handedness: "right",
+    measuredFps: 29.8,
+    trackerVersion: "webgpu-vision-0.3.1",
+    smootherBypass: true,
+  },
+  samples: [ ],
+}
+```
+
+`sessionId` lets analysis group trials recorded under the same conditions (same lighting, same camera setup, same warmup state). Cross-session variance can swamp class differences if you don't control for it.
+
+`smootherBypass: true` is a runtime assertion that the recorder is actually reading pre-smoother data. If this ever shows false, the dataset is contaminated and should be discarded.
+
+`measuredFps` because the nominal 30fps is often closer to 28-29fps with jitter, and derivatives need the actual frame rate to compute correctly.
+
+#### Dataset format
+JSON Lines. `spellaria_motion_dataset_YYYY-MM-DD_HHMMSS.jsonl`
+
+JSONL streams trivially into Python/pandas for analysis, appends cleanly across sessions without rewriting a big JSON array, and survives partial writes if the browser crashes mid-export.
+
+#### Data source
+Subscribe to the hand tracking pipeline before the adaptive smoother. The whole experiment tests biomechanical signatures in raw motion. Recording smoothed data would measure the smoother's behavior, not the hand's.
+
+#### UI
+
+```
+┌────────────────────────────────────────────┐
+│ SpellARia Motion Signature Recorder        │
+├────────────────────────────────────────────┤
+│                                            │
+│     [Live webcam + hand skeleton]          │
+│                                            │
+│  ● RECORDING REVERSAL  (0.34s)             │
+│                                            │
+│  Hold R → reversal                         │
+│  Hold T → termination                      │
+│  Backspace → discard last trial            │
+│                                            │
+│  Reversals:     14                         │
+│  Terminations:  11                         │
+│  FPS avg:       29.8                       │
+│  Dropped frames: 3 of 2,847                │
+│                                            │
+│  [ Export Dataset ]  [ Clear Session ]     │
+└────────────────────────────────────────────┘
+```
+
+Live skeleton overlay so you can confirm the tracker is locked onto your hand before starting a trial. Bad tracking produces bad data and should be caught at collection time, not at analysis time.
+
+FPS and dropped-frame counts visible during collection so degrading tracking performance (lighting change, CPU spike) is noticed immediately rather than discovered in post-analysis.
+
+Per-class counters so you can balance the dataset live rather than exporting, analyzing, realizing you have 40 reversals and 12 stops, and re-collecting.
+
+Backspace discards the last trial -- for when you flub a recording (moved the wrong way, hand out of frame, realized mid-trial the class was wrong). Without this you either keep bad trials or pause to clean up IndexedDB manually.
+
+Visual states:
+- IDLE: white dot, "READY"
+- RECORDING_REVERSAL: red pulsing dot, elapsed time
+- RECORDING_TERMINATION: blue pulsing dot, elapsed time
+- SAVED: green checkmark, counter increments
+
+Color coding at a glance so you know which key you're actually holding without looking at the keyboard.
+
+#### State machine
+```
+IDLE ──R down──► RECORDING_REVERSAL ──R up──► save ──► IDLE
+IDLE ──T down──► RECORDING_TERMINATION ──T up──► save ──► IDLE
+```
+
+Edge cases:
+- Other key pressed during active trial: ignored. Switching labels mid-trial would produce a trial whose second half has the wrong label.
+- Window blur during recording: end trial, flag in metadata. A backgrounded tab throttles rAF and poisons the data.
+- Tracker returns no frame: mark `dropped: true`, continue. Don't end the trial -- users shouldn't lose a good trial because of one frame hiccup.
+
+#### File structure
+```
+/motion-recorder/
+  index.html
+  main.js              # entry, wires modules
+  recorder.js          # trial state machine, key handling
+  tracker-bridge.js    # subscribes to RAW hand tracking stream
+  storage.js           # IndexedDB wrapper
+  export.js            # .jsonl download
+  ui.js                # DOM updates
+  fps-monitor.js       # frame rate, drop detection
+  styles.css
+```
+
+Modular so the tracker-bridge can be swapped when the hand tracking pipeline evolves without touching recording logic. FPS monitoring is separated because it needs to keep running even when no trial is active (baseline tracker health check).
+
+#### Storage
+IndexedDB, two object stores: `trials` (keyed on trialId), `sessions`.
+
+IndexedDB over localStorage because trial datasets can get large (hundreds of trials × hundreds of frames × several keypoints) and localStorage has tight size limits.
+
+Sessions stored separately so setup metadata (tracker version, camera config, lighting notes if you add them) lives once per session rather than being duplicated on every trial.
+
+#### Export
+Button reads all trials from IndexedDB, serializes as JSONL, triggers download.
+
+Export-on-demand rather than auto-export because you may want to record across multiple sittings and export once at the end. IndexedDB persists across page reloads so in-progress sessions survive browser restarts.
+
+#### Analysis alignment (reference)
+- T trials: align to velocity magnitude minimum
+- R trials: align to first velocity sign change on dominant axis
+
+Computed offline from the recorded data. The recording protocol just produces labeled, time-stamped raw motion streams; extracting the alignment anchor is an analysis step.
+
+#### Open questions (to resolve when building)
+1. Which hook in the WebGPU hand tracking pipeline exposes raw pre-smoother keypoints? (Today the `HandTracker.processFrame()` result hands returns landmarks straight from the landmark worker -- no smoother inside the library. Smoothing happens in the demo's `handleHandResult` via the One Euro filter. So subscribe BEFORE `handleHandResult` runs filters -- or ideally, have the library expose an `onRawFrame` callback.)
+2. Coordinate space of tracker output -- pixel, normalized, or 3D world? (Current pipeline: x/y are normalized [0,1], z is the raw landmark-model z-output. Record as-is; convert to whatever space analysis wants offline.)
+3. Default keypoint set (wrist/palm/indexTip/middleTip), or different? (Start with those 4; palm = centroid of wrist + 3 MCPs. If palm isn't already a single landmark, compute it at record time. Fine-grained analysis can add more later from the raw 21-keypoint stream.)
+4. Existing IndexedDB schema in SpellARia to avoid conflicts with, or greenfield? (Greenfield in this repo, under a namespaced DB name like `wgv_motion_recorder` to avoid collisions if this lib + Spellaria eventually run on the same origin.)
+
+**Priority: critical path for SpellARia, near-term.** Build the recorder early. Data collection takes real wall-clock time (you have to physically perform hundreds of labeled motions), and every day it's delayed is a day of latency we could be eliminating. The recorder itself is a day of work; data collection is the longer tail; classifier training is straightforward once data exists.
+
+Order of operations:
+1. Build the recorder (consumes the existing `HandTracker.processFrame()` raw output; no library changes required).
+2. Collect a balanced dataset (≥100 trials per class, multiple sessions, multiple lighting conditions).
+3. Analyze offline (Python/pandas on the JSONL) to confirm the signatures are distinguishable before committing to classifier training.
+4. If signatures exist: train a small classifier (MLP or LSTM on a sliding window of derivatives), integrate into the SpellARia prediction pipeline. If signatures don't exist: fall back to the current conservative approach and pivot to other latency wins (prediction horizon, smoother tuning, etc).
+
+Worth doing in parallel with RTMPose evaluation -- the recorder consumes whatever pose source you hand it. If RTMPose lands later, the dataset can be re-collected or re-trained on the new source.
+
+#### Spec addition: Onset Prediction
+
+The motion-edge classifier (reversal vs termination) handles the END of motion. This addition handles the BEGINNING. Together they cover both sides of the perceived-latency problem.
+
+##### Purpose
+Detect motion initiation from rest and predict 1-2 frames forward on the emerging trajectory. Goal: visual hand starts moving on the same frame the user's real hand does, instead of lagging by the smoother's warmup window. Must reject tracker jitter to avoid amplifying non-motion into phantom movement.
+
+##### New recording keys
+- **Hold O** → onset-only trial. Hand starts at rest, moves. End of motion not tracked -- we only care about the initiation.
+- **Hold J** → jitter baseline. Hand held still for the duration of the key press. Collects the null distribution of tracker noise at rest.
+
+##### New trial labels
+`label` field extends to: `"reversal" | "termination" | "onset" | "jitter"`
+
+Everything else in the per-trial record is unchanged. J trials will tend to be short (1-2s), O trials short to medium (500ms-1s). No protocol change beyond label.
+
+##### Target trial counts for pilot
+- Reversals: 30
+- Terminations: 30
+- Onsets: 30
+- Jitter: 20 (shorter trials, enough samples for a stable noise floor)
+
+##### Detection features (computed at analysis time, then ported to runtime)
+
+Two features gate onset detection:
+
+**Feature 1: sustained acceleration magnitude**
+```
+mean_accel_mag = mean(|accel[n-2]|, |accel[n-1]|, |accel[n]|)
+```
+Averaged over 3 frames to reject single-frame jitter spikes. Computed per-axis then magnitude, or on the full 3D acceleration vector -- both worth testing.
+
+**Feature 2: acceleration direction consistency**
+```
+direction_consistency = dot(accel[n], accel[n-1]) / (|accel[n]| * |accel[n-1]|)
+```
+Cosine similarity of consecutive acceleration vectors. Real motion produces consistent direction (near 1.0). Jitter produces random direction (near 0 or negative).
+
+##### Threshold tuning
+Thresholds are set empirically from the J dataset.
+
+- `threshold_A` (magnitude): 95th percentile of `mean_accel_mag` across all jitter samples. Anything above this is above the noise floor.
+- `threshold_B` (consistency): 95th percentile of `direction_consistency` across all jitter samples. Anything above this represents direction-coherent motion.
+
+Validated against O dataset: check what fraction of true onsets are detected within 2 frames of the actual motion start (computed from velocity crossing a threshold). Aim for >90% detection rate with <5% false positives against the J dataset.
+
+##### Runtime gate
+```
+if mean_accel_mag > threshold_A AND direction_consistency > threshold_B:
+    fire_onset(predicted_position)
+```
+
+`predicted_position` = current smoothed position + current velocity * lookahead_ms. Lookahead starts at 1 frame (~33ms at 30fps). Bumping to 2 frames increases responsiveness but compounds false-positive cost -- tune after observing real behavior.
+
+##### Pipeline integration
+
+Onset prediction is a gated stage that runs only during the rest-to-motion transition. Once the adaptive smoother has accumulated enough trajectory history to produce stable output (existing behavior), onset stage goes dormant until the next rest interval.
+
+```
+Raw pose
+   ↓
+Onset detector
+   ├─ Fires → output predicted position, persist for next 1-2 frames
+   └─ Does not fire → pass raw through to adaptive smoother
+   ↓
+Adaptive smoother (unchanged)
+   ↓
+Display
+```
+
+State machine for the detector:
+```
+REST ──onset_detected──► PREDICTING ──hand_off──► TRACKING ──velocity<rest_threshold──► REST
+```
+- **REST**: velocity below rest threshold, running the onset gate every frame
+- **PREDICTING**: onset detected, emitting predicted position for 1-2 frames while smoother spins up
+- **TRACKING**: smoother has stable trajectory history, onset detector dormant
+
+##### False-positive mitigations
+- Require direction consistency across 2 consecutive frames before firing (not just one).
+- Conservative lookahead (1 frame) until real-world false-positive rate is characterized.
+- On false fire: predicted position snaps back to raw when velocity fails to sustain. Single-frame visual artifact, acceptable as worst case.
+
+##### Open questions
+1. Compute acceleration from wrist, palm, or fingertip keypoint? Likely wrist (least noisy), but worth testing across channels in analysis.
+2. Should thresholds be global or per-user-session? Individual hand dynamics vary; per-session calibration (a 5-second "hold still" prompt at startup) may be worth the friction.
+3. Interaction with reversal detector (when that lands): onset and reversal both involve acceleration from low-velocity state. Classifier may need to arbitrate.
 
 ### The original Phase 4 plan (still relevant for context)
 
