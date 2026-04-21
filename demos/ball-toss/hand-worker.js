@@ -25,10 +25,17 @@ self.onmessage = async (e) => {
   if (type === 'detect' && landmarker) {
     const result = landmarker.detectForVideo(image, timestamp);
     image.close(); // Release the transferred ImageBitmap
-    let landmarks = null;
+    // Return both landmarks and MediaPipe's handedness classification so the
+    // consumer can assign hands to stable slots (slot 0 = one handedness,
+    // slot 1 = the other). Without this, when one hand leaves the frame the
+    // other hand shifts to index 0 and visually swaps colors.
+    let hands = null;
     if (result.landmarks && result.landmarks.length > 0) {
-      landmarks = result.landmarks.map(hand => hand.map(p => ({ x: p.x, y: p.y, z: p.z })));
+      hands = result.landmarks.map((hand, i) => ({
+        landmarks: hand.map(p => ({ x: p.x, y: p.y, z: p.z })),
+        handedness: result.handednesses?.[i]?.[0]?.categoryName || null,
+      }));
     }
-    self.postMessage({ type: 'result', landmarks });
+    self.postMessage({ type: 'result', hands });
   }
 };
