@@ -178,11 +178,11 @@ function ratio(ours, theirs) {
   return ((-1 / (r - 1) * 100).toFixed(0) + '% slow').padStart(8);
 }
 
-function pctFaster(ours, theirs) {
+function xFaster(ours, theirs) {
   if (typeof ours === 'string' || typeof theirs === 'string') return '     N/A';
-  const pct = ((theirs - ours) / theirs * 100);
-  if (pct > 0) return ('+' + pct.toFixed(1) + '%').padStart(8);
-  return (pct.toFixed(1) + '%').padStart(8);
+  const r = theirs / ours;
+  if (r >= 1) return (r.toFixed(1) + 'x').padStart(8);
+  return (r.toFixed(2) + 'x').padStart(8);
 }
 
 (async () => {
@@ -223,12 +223,12 @@ try {
       + fmt(r.wgsl)
       + fmt(r.ortGpu)
       + fmt(r.ortWasm)
-      + pctFaster(r.wgsl, r.ortGpu)
-      + pctFaster(r.wgsl, r.ortWasm);
+      + xFaster(r.wgsl, r.ortGpu)
+      + xFaster(r.wgsl, r.ortWasm);
     log(row);
   }
 
-  log('\nPositive % = WGSL is faster. Negative % = WGSL is slower.');
+  log('\n>1.0x = WGSL is faster. <1.0x = WGSL is slower.');
   log('\n=================================================');
   log('done');
 

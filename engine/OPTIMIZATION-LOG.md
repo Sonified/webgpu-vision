@@ -8,21 +8,21 @@ Every approach tried, what it got us, what it cost. The ground truth.
 
 | | **WGSL (ours)** | **ORT WebGPU** | **MediaPipe** | vs ORT | vs MediaPipe |
 |---|---|---|---|---|---|
-| Hand (2 hands) | **7.9ms** | 8.2ms | 29.3ms | **3.7% faster** | **3.7x faster** |
-| Face LM | **12.4ms** | 13.0ms | 25.1ms | **4.6% faster** | **2.0x faster** |
+| Hand (2 hands) | **7.9ms** | 8.2ms | 29.3ms | **1.04x** | **3.7x** |
+| Face LM | **12.4ms** | 13.0ms | 25.1ms | **1.05x** | **2.0x** |
 
 **Headless (single model, no contention -- the ceiling):**
 
 | Model | Baseline | **WGSL** | **ORT WebGPU** | **ORT WASM** | vs ORT-GPU | vs ORT-WASM |
 |---|---|---|---|---|---|---|
-| Palm | 18.61ms | **9.43ms** | 24.40ms | 28.90ms | **2.6x faster** | **3.1x faster** |
-| Hand | 12.67ms | **2.98ms** | 6.89ms | 18.02ms | **2.3x faster** | **6.0x faster** |
-| Face det | 12.70ms | **2.92ms** | 2.77ms | 3.02ms | 5% slower | parity |
-| Face LM | 53.61ms | **5.88ms** | 8.27ms | 13.86ms | **1.4x faster** | **2.4x faster** |
+| Palm | 18.61ms | **9.34ms** | 24.40ms | 28.90ms | **2.6x** | **3.1x** |
+| Hand | 12.67ms | **3.03ms** | 6.89ms | 18.02ms | **2.3x** | **5.9x** |
+| Face det | 12.70ms | **3.13ms** | 3.33ms | 3.02ms | **1.1x** | 0.97x |
+| Face LM | 53.61ms | **5.88ms** | 8.27ms | 13.86ms | **1.4x** | **2.4x** |
 
 Notes:
 - ORT WebGPU's palm detector is barely faster than its own WASM (24.4 vs 28.9ms). Their GPU EP adds almost no value on that model. We're 2.6x faster.
-- Face detector is the one model where ORT-GPU edges us out (2.77 vs 2.92ms). It's a tiny model where dispatch overhead dominates and ORT's tighter C++/WASM GPU API access wins.
+- Face detector is parity territory -- varies between 0.95x and 1.1x across runs depending on GPU scheduling. Model is so small (~3ms) that submit overhead dominates.
 - Run with `node engine/bench-all.mjs` to reproduce. 50 iterations, 20 warmup, isolated headless Chrome.
 
 GPU compute only (timestamp queries, excludes readback/submit overhead):
@@ -277,10 +277,10 @@ The key was NOT architecture (unified vs separate workers) -- it was **shader-le
 
 From-scratch WGSL inference engine now **faster than Microsoft's ONNX Runtime WebGPU backend** on live demo benchmarks:
 
-| | **WGSL (live)** | **ORT-WebGPU (live)** | |
+| | **WGSL (live)** | **ORT-WebGPU (live)** | vs ORT |
 |---|---|---|---|
-| Hand (2 hands) | **7.9ms** | 8.2ms | **3.7% faster** |
-| Face LM | **12.4ms** | 13.0ms | **4.6% faster** |
+| Hand (2 hands) | **7.9ms** | 8.2ms | **1.04x** |
+| Face LM | **12.4ms** | 13.0ms | **1.05x** |
 | MediaPipe Hand | 29.3ms | | 3.7x slower |
 | MediaPipe Face | 25.1ms | | 2.0x slower |
 

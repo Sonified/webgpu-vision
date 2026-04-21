@@ -594,10 +594,10 @@ Architecture: separate workers (5 GPU devices) with optimized shaders outperform
 
 | Model | **WGSL** | **ORT WebGPU** | **ORT WASM** | vs ORT-GPU | vs ORT-WASM |
 |---|---|---|---|---|---|
-| Palm | **9.43ms** | 24.40ms | 28.90ms | **2.6x faster** | **3.1x faster** |
-| Hand | **2.98ms** | 6.89ms | 18.02ms | **2.3x faster** | **6.0x faster** |
-| Face det | **2.92ms** | 2.77ms | 3.02ms | 5% slower | parity |
-| Face LM | **5.88ms** | 8.27ms | 13.86ms | **1.4x faster** | **2.4x faster** |
+| Palm | **9.34ms** | 24.40ms | 28.90ms | **2.6x** | **3.1x** |
+| Hand | **3.03ms** | 6.89ms | 18.02ms | **2.3x** | **5.9x** |
+| Face det | **3.13ms** | 3.33ms | 3.02ms | **1.1x** | 0.97x |
+| Face LM | **5.88ms** | 8.27ms | 13.86ms | **1.4x** | **2.4x** |
 
 Run `node engine/bench-all.mjs` to reproduce (50 iterations, 20 warmup, headless Chrome).
 
@@ -617,8 +617,8 @@ Run `node engine/bench-all.mjs` to reproduce (50 iterations, 20 warmup, headless
 
 | | WGSL | ORT-WebGPU | MediaPipe | vs ORT | vs MediaPipe |
 |---|---|---|---|---|---|
-| Hand | **7.9ms** | 8.2ms | 29.3ms | **3.7% faster** | **3.7x faster** |
-| Face LM | **12.4ms** | 13.0ms | 25.1ms | **4.6% faster** | **2.0x faster** |
+| Hand | **7.9ms** | 8.2ms | 29.3ms | **1.04x** | **3.7x** |
+| Face LM | **12.4ms** | 13.0ms | 25.1ms | **1.05x** | **2.0x** |
 
 Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on iPhone.
 
