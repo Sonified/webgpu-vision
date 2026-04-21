@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Viz - Procedural Energy Hand</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✋</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; bottom: 16px; left: 16px; z-index: 10;
+    font-size: 1rem; line-height: 1.6; color: #ccc;
+    background: rgba(10,10,26,0.8); padding: 12px 16px; border-radius: 8px;
+    border: 1px solid #333;
+  }
+  #hud .label { color: #888; }
+  #hud .val { color: #4fc3f7; font-weight: 600; }
+  #start-btn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 16px 32px;
+    font-size: 1.1rem; background: #4fc3f7; color: #0a0a1a;
+    border: none; border-radius: 8px; cursor: pointer;
+    font-weight: 600;
+  }
+  #start-btn:hover { background: #81d4fa; }
+  #controls {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font-size: 1rem; color: #ccc;
+    background: rgba(10,10,26,0.92); padding: 8px 12px; border-radius: 6px;
+    border: 1px solid #333; display: none;
+  }
+  #controls select {
+    background: #111; color: #fff; border: 1px solid #444; border-radius: 3px;
+    padding: 2px 6px; font-size: 1rem; margin-left: 4px;
+  }
+  #controls .sep { margin-left: 10px; }
+  #self-view {
+    position: fixed; bottom: 16px; right: 16px; z-index: 10;
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid #444;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+    display: none; width: 200px;
+  }
+  #self-view video { display: block; width: 100%; height: auto; transform: scaleX(-1); }
+  #status {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 10; font-size: 1.2rem; color: #ccc; font-weight: 500;
+    background: rgba(10,10,26,0.92); padding: 14px 22px; border-radius: 6px;
+    border: 1px solid #333; text-align: center; max-width: 480px; display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- COI for WebGPU SharedArrayBuffer -->
+<script src="../../coi-serviceworker.js"></script>
+
+<button id="start-btn">Start Camera</button>
+<div id="status"></div>
+
+<div id="controls">
+  <span style="color:#888;">Backend</span>
+  <select id="backend-select">
+    <option value="webgpu">WebGPU</option>
+    <option value="mediapipe">MediaPipe</option>
+  </select>
+  <span class="sep" style="color:#888;">Style</span>
+  <select id="hand-style">
+    <option value="energy">Energy</option>
+    <option value="fire">Fire</option>
+    <option value="ice">Ice</option>
+    <option value="void">Void</option>
+    <option value="xray">X-Ray</option>
+  </select>
+  <span class="sep" style="color:#888;">Particles</span>
+  <select id="particle-mode">
+    <option value="trail">Trail</option>
+    <option value="shimmer">Shimmer</option>
+    <option value="none">None</option>
+  </select>
+  <span class="sep" style="color:#888;">Interp</span>
+  <select id="interp-select">
+    <option value="1">1x (off)</option>
+    <option value="2">2x</option>
+    <option value="4">4x</option>
+    <option value="adaptive">Adaptive</option>
+  </select>
+</div>
+
+<div id="self-view"><video id="video" autoplay playsinline muted></video></div>
+
+<div id="hud">
+  <span class="label">FPS:</span> <span class="val" id="fps">--</span><br>
+  <span class="label">Hands:</span> <span class="val" id="hand-count">0</span><br>
+  <span class="label">Backend:</span> <span class="val" id="backend-label">--</span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.171.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+
+// ---- Hand topology ----
+const EDGES = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17]
+];
+
+const FINGERTIPS = [4, 8, 12, 16, 20];
+// Which fingertips emit waves (indices into FINGERTIPS array)
+// 0=thumb(4), 1=index(8), 2=middle(12), 3=ring(16), 4=pinky(20)
+const WAVE_FINGERS = [1]; // index fingers only
+const JOINT_RADIUS = 0.06;
+const TIP_RADIUS = 0.08;
+const BONE_RADIUS = 0.03;
+
+// ---- Style palettes ----
+const STYLES = {
+  energy: { joint: 0x4fc3f7, bone: 0x29b6f6, tip: 0x81d4fa, emissive: 0x0288d1, bloom: 1.5 },
+  fire:   { joint: 0xff6d00, bone: 0xff9100, tip: 0xffab00, emissive: 0xbf360c, bloom: 2.0 },
+  ice:    { joint: 0xb3e5fc, bone: 0x81d4fa, tip: 0xe1f5fe, emissive: 0x0277bd, bloom: 1.2 },
+  void:   { joint: 0xce93d8, bone: 0xab47bc, tip: 0xf3e5f5, emissive: 0x6a1b9a, bloom: 2.5 },
+  xray:   { joint: 0x69f0ae, bone: 0x00e676, tip: 0xb9f6ca, emissive: 0x2e7d32, bloom: 1.0 },
+};
+
+// ---- Persist user selections ----
+const LS_KEY = 'handviz_prefs';
+const savedPrefs = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+function savePref(k, v) { savedPrefs[k] = v; localStorage.setItem(LS_KEY, JSON.stringify(savedPrefs)); }
+
+let currentStyle = savedPrefs.style || 'energy';
+let activeBackend = savedPrefs.backend || 'webgpu';
+
+const statusEl = document.getElementById('status');
+const video = document.getElementById('video');
+const backendSelect = document.getElementById('backend-select');
+
+// Apply saved selections to dropdowns
+document.getElementById('hand-style').value = currentStyle;
+backendSelect.value = activeBackend;
+document.getElementById('particle-mode').value = savedPrefs.particles || 'trail';
+
+// ---- Three.js setup ----
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 0, 5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ReinhardToneMapping;
+renderer.toneMappingExposure = 1.5;
+document.body.prepend(renderer.domElement);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight), 1.5, 0.4, 0.2
+);
+composer.addPass(bloomPass);
+
+const ambient = new THREE.AmbientLight(0x334466, 0.5);
+scene.add(ambient);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+// ---- Build procedural hand meshes (2 hands) ----
+function makeHandGroup() {
+  const group = new THREE.Group();
+  const s = STYLES[currentStyle];
+
+  const jointGeo = new THREE.SphereGeometry(JOINT_RADIUS, 12, 8);
+  const tipGeo = new THREE.SphereGeometry(TIP_RADIUS, 12, 8);
+  const boneGeo = new THREE.CylinderGeometry(BONE_RADIUS, BONE_RADIUS, 1, 6);
+
+  const jointMat = new THREE.MeshStandardMaterial({
+    color: s.joint, emissive: s.emissive, emissiveIntensity: 0.8,
+    roughness: 0.3, metalness: 0.6, transparent: true, opacity: 0.9,
+  });
+  const tipMat = new THREE.MeshStandardMaterial({
+    color: s.tip, emissive: s.emissive, emissiveIntensity: 1.2,
+    roughness: 0.2, metalness: 0.7, transparent: true, opacity: 0.95,
+  });
+  const boneMat = new THREE.MeshStandardMaterial({
+    color: s.bone, emissive: s.emissive, emissiveIntensity: 0.6,
+    roughness: 0.4, metalness: 0.5, transparent: true, opacity: 0.7,
+  });
+
+  const joints = [];
+  for (let i = 0; i < 21; i++) {
+    const isTip = FINGERTIPS.includes(i);
+    const mesh = new THREE.Mesh(isTip ? tipGeo : jointGeo, isTip ? tipMat : jointMat);
+    mesh.visible = false;
+    group.add(mesh);
+    joints.push(mesh);
+  }
+
+  const bones = [];
+  for (let i = 0; i < EDGES.length; i++) {
+    const mesh = new THREE.Mesh(boneGeo, boneMat);
+    mesh.visible = false;
+    group.add(mesh);
+    bones.push(mesh);
+  }
+
+  group.userData = { joints, bones, jointMat, tipMat, boneMat };
+  return group;
+}
+
+const handGroups = [makeHandGroup(), makeHandGroup()];
+handGroups.forEach(g => scene.add(g));
+
+function updateStyle(styleName) {
+  currentStyle = styleName;
+  const s = STYLES[styleName];
+  bloomPass.strength = s.bloom;
+  for (const g of handGroups) {
+    const { jointMat, tipMat, boneMat } = g.userData;
+    jointMat.color.setHex(s.joint); jointMat.emissive.setHex(s.emissive);
+    tipMat.color.setHex(s.tip); tipMat.emissive.setHex(s.emissive);
+    boneMat.color.setHex(s.bone); boneMat.emissive.setHex(s.emissive);
+  }
+}
+
+document.getElementById('hand-style').addEventListener('change', (e) => {
+  updateStyle(e.target.value);
+  updateParticleColors();
+  savePref('style', e.target.value);
+});
+
+// ---- Landmark -> 3D position ----
+function lmToWorld(lm) {
+  return new THREE.Vector3(
+    -(lm.x - 0.5) * 8,
+    -(lm.y - 0.5) * 6,
+    lm.z * -3
+  );
+}
+
+function updateHand(group, landmarks) {
+  const { joints, bones } = group.userData;
+  if (!landmarks) {
+    joints.forEach(j => j.visible = false);
+    bones.forEach(b => b.visible = false);
+    return;
+  }
+  const positions = landmarks.map(lmToWorld);
+  for (let i = 0; i < 21; i++) {
+    joints[i].position.copy(positions[i]);
+    joints[i].visible = true;
+  }
+  for (let i = 0; i < EDGES.length; i++) {
+    const [a, b] = EDGES[i];
+    const pa = positions[a], pb = positions[b];
+    const mid = new THREE.Vector3().addVectors(pa, pb).multiplyScalar(0.5);
+    bones[i].position.copy(mid);
+    bones[i].scale.set(1, pa.distanceTo(pb), 1);
+    bones[i].lookAt(pb);
+    bones[i].rotateX(Math.PI / 2);
+    bones[i].visible = true;
+  }
+}
+
+// ---- Particle system ----
+const MAX_PARTICLES = 2000;
+const particlePositions = new Float32Array(MAX_PARTICLES * 3);
+const particleSizes = new Float32Array(MAX_PARTICLES);
+const particleAlphas = new Float32Array(MAX_PARTICLES);
+const particleVelocities = new Float32Array(MAX_PARTICLES * 3);
+const particleAges = new Float32Array(MAX_PARTICLES);
+const particleLifetimes = new Float32Array(MAX_PARTICLES);
+let particleHead = 0;
+
+const particleGeo = new THREE.BufferGeometry();
+particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+particleGeo.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+particleGeo.setAttribute('alpha', new THREE.BufferAttribute(particleAlphas, 1));
+
+const particleMat = new THREE.ShaderMaterial({
+  uniforms: {
+    color: { value: new THREE.Color(STYLES.energy.tip) },
+    emissive: { value: new THREE.Color(STYLES.energy.emissive) },
+  },
+  vertexShader: `
+    attribute float size;
+    attribute float alpha;
+    varying float vAlpha;
+    void main() {
+      vAlpha = alpha;
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (200.0 / -mvPos.z);
+      gl_Position = projectionMatrix * mvPos;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 color;
+    uniform vec3 emissive;
+    varying float vAlpha;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      if (d > 1.0) discard;
+      float glow = exp(-d * d * 3.0);
+      vec3 c = mix(emissive, color, glow);
+      gl_FragColor = vec4(c, vAlpha * glow);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
+const particlePoints = new THREE.Points(particleGeo, particleMat);
+scene.add(particlePoints);
+
+function emitParticle(pos, vel, size, lifetime) {
+  const i = particleHead;
+  particleHead = (particleHead + 1) % MAX_PARTICLES;
+  particlePositions[i * 3] = pos.x;
+  particlePositions[i * 3 + 1] = pos.y;
+  particlePositions[i * 3 + 2] = pos.z;
+  particleVelocities[i * 3] = vel.x;
+  particleVelocities[i * 3 + 1] = vel.y;
+  particleVelocities[i * 3 + 2] = vel.z;
+  particleSizes[i] = size;
+  particleAlphas[i] = 1.0;
+  particleAges[i] = 0;
+  particleLifetimes[i] = lifetime;
+}
+
+let particleMode = savedPrefs.particles || 'trail';
+document.getElementById('particle-mode').addEventListener('change', (e) => { particleMode = e.target.value; savePref('particles', e.target.value); });
+
+const prevTipPositions = [
+  Array.from({ length: 5 }, () => new THREE.Vector3()),
+  Array.from({ length: 5 }, () => new THREE.Vector3()),
+];
+const tipInited = [false, false];
+
+function emitHandParticles(handIdx, landmarks) {
+  if (!landmarks) { tipInited[handIdx] = false; return; }
+  if (particleMode === 'none') return;
+  const positions = landmarks.map(lmToWorld);
+
+  if (particleMode === 'trail') emitTrailParticles(handIdx, positions);
+  else if (particleMode === 'shimmer') emitShimmerParticles(handIdx, positions);
+}
+
+function emitTrailParticles(handIdx, positions) {
+  for (let t = 0; t < FINGERTIPS.length; t++) {
+    const tipPos = positions[FINGERTIPS[t]];
+    const prev = prevTipPositions[handIdx][t];
+
+    if (tipInited[handIdx]) {
+      const vel = new THREE.Vector3().subVectors(tipPos, prev);
+      const speed = vel.length();
+
+      const drift = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.02,
+        (Math.random() - 0.5) * 0.02 + 0.01,
+        (Math.random() - 0.5) * 0.02
+      );
+      emitParticle(tipPos, drift, 0.06 + Math.random() * 0.04, 0.6 + Math.random() * 0.4);
+
+      if (speed > 0.05) {
+        const count = Math.min(Math.floor(speed * 40), 8);
+        for (let j = 0; j < count; j++) {
+          const sparkVel = new THREE.Vector3(
+            vel.x * -0.3 + (Math.random() - 0.5) * 0.15,
+            vel.y * -0.3 + (Math.random() - 0.5) * 0.15 + 0.03,
+            vel.z * -0.3 + (Math.random() - 0.5) * 0.15
+          );
+          emitParticle(tipPos, sparkVel, 0.03 + Math.random() * 0.05, 0.3 + Math.random() * 0.3);
+        }
+      }
+    }
+    prev.copy(tipPos);
+  }
+  tipInited[handIdx] = true;
+
+  if (Math.random() < 0.3) {
+    const palmIndices = [0, 5, 9, 13, 17];
+    const a = palmIndices[Math.floor(Math.random() * palmIndices.length)];
+    const b = palmIndices[Math.floor(Math.random() * palmIndices.length)];
+    if (a !== b) {
+      const t = Math.random();
+      const pos = new THREE.Vector3().lerpVectors(positions[a], positions[b], t);
+      pos.x += (Math.random() - 0.5) * 0.1;
+      pos.y += (Math.random() - 0.5) * 0.1;
+      pos.z += (Math.random() - 0.5) * 0.1;
+      const drift = new THREE.Vector3(0, 0.005 + Math.random() * 0.01, 0);
+      emitParticle(pos, drift, 0.04 + Math.random() * 0.03, 0.5 + Math.random() * 0.5);
+    }
+  }
+}
+
+function emitShimmerParticles(handIdx, positions) {
+  // Gentle energy: particles materialize near the hand and slowly rise, fading out
+  // 1-2 per frame -- calm, not frantic
+  if (Math.random() < 0.6) {
+    const joint = Math.floor(Math.random() * 21);
+    const origin = positions[joint];
+    const pos = origin.clone().add(new THREE.Vector3(
+      (Math.random() - 0.5) * 0.15,
+      (Math.random() - 0.5) * 0.1,
+      (Math.random() - 0.5) * 0.1
+    ));
+    const rise = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.01,
+      0.02 + Math.random() * 0.03,
+      (Math.random() - 0.5) * 0.01
+    );
+    emitParticle(pos, rise, 0.04 + Math.random() * 0.04, 0.8 + Math.random() * 0.6);
+  }
+
+  // Occasional larger mote between bones -- slow drift upward
+  if (Math.random() < 0.2) {
+    const a = Math.floor(Math.random() * 21);
+    const b = Math.floor(Math.random() * 21);
+    const t = Math.random();
+    const pos = new THREE.Vector3().lerpVectors(positions[a], positions[b], t);
+    pos.x += (Math.random() - 0.5) * 0.08;
+    pos.y += (Math.random() - 0.5) * 0.08;
+    const rise = new THREE.Vector3(0, 0.015 + Math.random() * 0.02, 0);
+    emitParticle(pos, rise, 0.06 + Math.random() * 0.05, 1.0 + Math.random() * 0.8);
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = 0; i < MAX_PARTICLES; i++) {
+    if (particleAlphas[i] <= 0) continue;
+    particleAges[i] += dt;
+    const life = particleAges[i] / particleLifetimes[i];
+    if (life >= 1.0) {
+      particleAlphas[i] = 0;
+      particleSizes[i] = 0;
+      continue;
+    }
+    particlePositions[i * 3] += particleVelocities[i * 3] * dt;
+    particlePositions[i * 3 + 1] += particleVelocities[i * 3 + 1] * dt;
+    particlePositions[i * 3 + 2] += particleVelocities[i * 3 + 2] * dt;
+    // Fade out and shrink
+    particleAlphas[i] = 1.0 - life * life;
+    particleSizes[i] *= 0.995;
+    // Gentle upward drift
+    particleVelocities[i * 3 + 1] += 0.002 * dt;
+  }
+  particleGeo.attributes.position.needsUpdate = true;
+  particleGeo.attributes.size.needsUpdate = true;
+  particleGeo.attributes.alpha.needsUpdate = true;
+}
+
+// ---- Palm energy web (triangle mesh between palm landmarks) ----
+const PALM_TRIS = [
+  [0, 5, 9], [0, 9, 13], [0, 13, 17], [5, 9, 13], [9, 13, 17]
+];
+function makePalmWeb() {
+  const geo = new THREE.BufferGeometry();
+  const verts = new Float32Array(PALM_TRIS.length * 9);
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  const mat = new THREE.MeshBasicMaterial({
+    color: STYLES.energy.emissive,
+    transparent: true, opacity: 0.12,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+const palmWebs = [makePalmWeb(), makePalmWeb()];
+
+function updatePalmWeb(webMesh, landmarks) {
+  if (!landmarks) { webMesh.visible = false; return; }
+  const positions = landmarks.map(lmToWorld);
+  const verts = webMesh.geometry.attributes.position.array;
+  for (let t = 0; t < PALM_TRIS.length; t++) {
+    const [a, b, c] = PALM_TRIS[t];
+    verts[t * 9 + 0] = positions[a].x; verts[t * 9 + 1] = positions[a].y; verts[t * 9 + 2] = positions[a].z;
+    verts[t * 9 + 3] = positions[b].x; verts[t * 9 + 4] = positions[b].y; verts[t * 9 + 5] = positions[b].z;
+    verts[t * 9 + 6] = positions[c].x; verts[t * 9 + 7] = positions[c].y; verts[t * 9 + 8] = positions[c].z;
+  }
+  webMesh.geometry.attributes.position.needsUpdate = true;
+  const pulse = 0.08 + 0.06 * Math.sin(performance.now() * 0.004);
+  webMesh.material.opacity = pulse;
+  webMesh.visible = true;
+}
+
+// ---- Wave equation simulation (adapted from EMDR repo) ----
+const WAVE_GRID = 256;
+let waveTargets, waveSimScene, waveSimCamera, waveSimMaterial;
+let waveDisplayPlane, waveDisplayMaterial;
+let currentWaveTarget = 0;
+const prevWaveTips = [new Array(5).fill(null), new Array(5).fill(null)];
+
+function updateParticleColors() {
+  const s = STYLES[currentStyle];
+  particleMat.uniforms.color.value.setHex(s.tip);
+  particleMat.uniforms.emissive.value.setHex(s.emissive);
+  palmWebs.forEach(w => w.material.color.setHex(s.emissive));
+  if (waveDisplayMaterial) waveDisplayMaterial.uniforms.uColor.value.setHex(s.emissive);
+}
+
+(function initWaveEquation() {
+  const rtOpts = {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat, type: THREE.FloatType,
+  };
+  waveTargets = [
+    new THREE.WebGLRenderTarget(WAVE_GRID, WAVE_GRID, rtOpts),
+    new THREE.WebGLRenderTarget(WAVE_GRID, WAVE_GRID, rtOpts),
+  ];
+  waveSimScene = new THREE.Scene();
+  waveSimCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  waveSimMaterial = new THREE.ShaderMaterial({
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      varying vec2 vUv;
+      uniform sampler2D uPrevState;
+      uniform vec2 uResolution;
+      uniform float uWaveSpeed;
+      uniform float uDamping;
+      uniform vec3 uSources[10];
+      uniform int uNumSources;
+      uniform float uSourceRadius;
+
+      void main() {
+        vec2 texel = 1.0 / uResolution;
+        vec4 state = texture2D(uPrevState, vUv);
+        float current = state.r;
+        float previous = state.g;
+
+        float left = texture2D(uPrevState, vec2(max(vUv.x - texel.x, 0.0), vUv.y)).r;
+        float right = texture2D(uPrevState, vec2(min(vUv.x + texel.x, 1.0), vUv.y)).r;
+        float up = texture2D(uPrevState, vec2(vUv.x, min(vUv.y + texel.y, 1.0))).r;
+        float down = texture2D(uPrevState, vec2(vUv.x, max(vUv.y - texel.y, 0.0))).r;
+
+        float laplacian = left + right + up + down - 4.0 * current;
+        float velocity = current - previous;
+        float next = current + velocity * uDamping + uWaveSpeed * laplacian;
+
+        for (int i = 0; i < 10; i++) {
+          if (i >= uNumSources) break;
+          float dist = length(vUv - uSources[i].xy);
+          if (dist < uSourceRadius) {
+            float falloff = 1.0 - dist / uSourceRadius;
+            next += uSources[i].z * falloff * falloff;
+          }
+        }
+
+        float edge = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+        next *= smoothstep(0.0, 0.04, edge);
+
+        gl_FragColor = vec4(next, current, 0.0, 1.0);
+      }
+    `,
+    uniforms: {
+      uPrevState: { value: null },
+      uResolution: { value: new THREE.Vector2(WAVE_GRID, WAVE_GRID) },
+      uWaveSpeed: { value: 0.45 },
+      uDamping: { value: 0.992 },
+      uSources: { value: Array.from({ length: 10 }, () => new THREE.Vector3(-99, -99, 0)) },
+      uNumSources: { value: 0 },
+      uSourceRadius: { value: 0.012 },
+    },
+  });
+  waveSimScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), waveSimMaterial));
+
+  waveDisplayMaterial = new THREE.ShaderMaterial({
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      varying vec2 vUv;
+      uniform sampler2D uWaveState;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform vec2 uResolution;
+
+      void main() {
+        vec2 texel = 1.0 / uResolution;
+        float l = texture2D(uWaveState, vUv + vec2(-texel.x, 0.0)).r;
+        float r = texture2D(uWaveState, vUv + vec2(texel.x, 0.0)).r;
+        float u = texture2D(uWaveState, vUv + vec2(0.0, texel.y)).r;
+        float d = texture2D(uWaveState, vUv + vec2(0.0, -texel.y)).r;
+
+        vec2 gradient = vec2(r - l, u - d);
+        float steepness = length(gradient) * 12.0;
+        float highlight = smoothstep(0.2, 0.7, steepness);
+        vec3 color = mix(uColor, vec3(1.0), highlight * 0.3);
+        float alpha = min(steepness * uOpacity, 1.0);
+
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    uniforms: {
+      uWaveState: { value: null },
+      uColor: { value: new THREE.Color(STYLES.energy.emissive) },
+      uOpacity: { value: 0.35 },
+      uResolution: { value: new THREE.Vector2(WAVE_GRID, WAVE_GRID) },
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  waveDisplayPlane = new THREE.Mesh(new THREE.PlaneGeometry(16, 10), waveDisplayMaterial);
+  waveDisplayPlane.position.z = -2;
+  scene.add(waveDisplayPlane);
+})();
+
+function worldToWaveUV(worldPos) {
+  // Perspective correction: plane is at z=-2, hands at z≈0, camera at z=5
+  // A point at (hx,hy,0) projects to the same screen pixel as (hx*7/5, hy*7/5, -2)
+  const s = 7 / 5;
+  return new THREE.Vector2((worldPos.x * s + 8) / 16, (worldPos.y * s + 5) / 10);
+}
+
+function stepWaveEquation(filteredHands) {
+  const sources = waveSimMaterial.uniforms.uSources.value;
+  let count = 0;
+  for (let h = 0; h < 2; h++) {
+    const lms = filteredHands[h];
+    if (!lms) { prevWaveTips[h].fill(null); continue; }
+    for (let w = 0; w < WAVE_FINGERS.length; w++) {
+      if (count >= 10) break;
+      const t = WAVE_FINGERS[w];
+      const worldPos = lmToWorld(lms[FINGERTIPS[t]]);
+      const uv = worldToWaveUV(worldPos);
+      const prev = prevWaveTips[h][t];
+      let force = 0.001;
+      if (prev) {
+        const speed = Math.hypot(uv.x - prev.x, uv.y - prev.y);
+        force += Math.min(speed * 2.0, 0.06);
+      }
+      sources[count].set(uv.x, uv.y, force);
+      prevWaveTips[h][t] = { x: uv.x, y: uv.y };
+      count++;
+    }
+  }
+  for (let i = count; i < 10; i++) sources[i].set(-99, -99, 0);
+  waveSimMaterial.uniforms.uNumSources.value = count;
+
+  const readTarget = waveTargets[currentWaveTarget];
+  const writeTarget = waveTargets[1 - currentWaveTarget];
+  waveSimMaterial.uniforms.uPrevState.value = readTarget.texture;
+  renderer.setRenderTarget(writeTarget);
+  renderer.render(waveSimScene, waveSimCamera);
+  renderer.setRenderTarget(null);
+  currentWaveTarget = 1 - currentWaveTarget;
+  waveDisplayMaterial.uniforms.uWaveState.value = waveTargets[currentWaveTarget].texture;
+}
+
+// ---- One Euro Filter ----
+class OneEuroFilter {
+  constructor(freq, minCutoff = 1.0, beta = 0.007, dCutoff = 1.0) {
+    this.freq = freq; this.minCutoff = minCutoff;
+    this.beta = beta; this.dCutoff = dCutoff;
+    this.xPrev = null; this.dxPrev = 0;
+  }
+  _alpha(cutoff) { const te = 1.0 / this.freq; const tau = 1.0 / (2 * Math.PI * cutoff); return 1.0 / (1.0 + tau / te); }
+  filter(x) {
+    if (this.xPrev === null) { this.xPrev = x; return x; }
+    const dx = (x - this.xPrev) * this.freq;
+    const adx = this._alpha(this.dCutoff);
+    this.dxPrev = adx * dx + (1 - adx) * this.dxPrev;
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.dxPrev);
+    const ax = this._alpha(cutoff);
+    this.xPrev = ax * x + (1 - ax) * this.xPrev;
+    return this.xPrev;
+  }
+  reset() { this.xPrev = null; this.dxPrev = 0; }
+}
+
+// Matching ball-toss WebGPU landmark preset: floor=0.1, beta=20, freq=60
+const filters = Array.from({ length: 2 }, () =>
+  Array.from({ length: 21 }, () =>
+    ({ x: new OneEuroFilter(60, 0.1, 20, 1.0), y: new OneEuroFilter(60, 0.1, 20, 1.0), z: new OneEuroFilter(60, 0.1, 20, 1.0) })
+  )
+);
+
+function filterLandmarks(handIdx, landmarks) {
+  if (!landmarks) {
+    filters[handIdx].forEach(f => { f.x.reset(); f.y.reset(); f.z.reset(); });
+    return null;
+  }
+  return landmarks.map((lm, j) => ({
+    x: filters[handIdx][j].x.filter(lm.x),
+    y: filters[handIdx][j].y.filter(lm.y),
+    z: filters[handIdx][j].z.filter(lm.z),
+  }));
+}
+
+// ---- Frame interpolation (from ball-toss) ----
+let interpolationMode = (activeBackend === 'mediapipe') ? '1' : (savedPrefs.interp || '1');
+const interpSelect = document.getElementById('interp-select');
+interpSelect.value = interpolationMode;
+if (activeBackend === 'mediapipe') { interpSelect.disabled = true; interpSelect.style.opacity = '0.4'; }
+interpSelect.addEventListener('change', (e) => {
+  interpolationMode = e.target.value;
+  savePref('interp', interpolationMode);
+});
+
+const SPEED_REST = 0.002;
+const SPEED_LOW  = 0.005;
+function interpModeFor(speed) {
+  if (interpolationMode !== 'adaptive') return parseInt(interpolationMode) || 1;
+  if (speed < SPEED_REST) return 1;
+  if (speed < SPEED_LOW)  return 2;
+  return 4;
+}
+
+const displayedHands = [null, null];
+const handInterpFramesLeft = [1, 1];
+const handMotion = [{ lastPos: null, currentMode: 1 }, { lastPos: null, currentMode: 1 }];
+
+function advanceInterp(h, target) {
+  if (!target) {
+    displayedHands[h] = null;
+    handMotion[h].lastPos = null;
+    handMotion[h].currentMode = 1;
+    return null;
+  }
+  // Compute speed from wrist for adaptive mode
+  const wrist = target[0];
+  let speed = 0;
+  if (handMotion[h].lastPos) {
+    speed = Math.hypot(wrist.x - handMotion[h].lastPos.x, wrist.y - handMotion[h].lastPos.y) * 2;
+  }
+  handMotion[h].lastPos = { x: wrist.x, y: wrist.y };
+
+  let displayed = displayedHands[h];
+  if (!displayed) {
+    displayed = target.map(p => ({ x: p.x, y: p.y, z: p.z }));
+    displayedHands[h] = displayed;
+    handMotion[h].currentMode = interpModeFor(speed);
+    handInterpFramesLeft[h] = handMotion[h].currentMode;
+    return displayed;
+  }
+  if (handInterpFramesLeft[h] > 1) {
+    const k = 1 / handInterpFramesLeft[h];
+    for (let i = 0; i < 21; i++) {
+      displayed[i].x += (target[i].x - displayed[i].x) * k;
+      displayed[i].y += (target[i].y - displayed[i].y) * k;
+      displayed[i].z += (target[i].z - displayed[i].z) * k;
+    }
+    handInterpFramesLeft[h]--;
+  } else {
+    for (let i = 0; i < 21; i++) {
+      displayed[i].x = target[i].x;
+      displayed[i].y = target[i].y;
+      displayed[i].z = target[i].z;
+    }
+    handMotion[h].currentMode = interpModeFor(speed);
+    handInterpFramesLeft[h] = handMotion[h].currentMode;
+  }
+  return displayed;
+}
+
+// ---- Shared state ----
+let latestHands = [null, null];
+
+function handleHandResult(hands, opts = {}) {
+  if (!hands) { latestHands = [null, null]; return; }
+  if (opts.stable) {
+    latestHands = hands.map(h => h ? h.landmarks : null);
+  } else {
+    const sorted = [null, null];
+    for (const h of hands) {
+      if (h.handedness === 'Right') sorted[0] = h.landmarks;
+      else if (h.handedness === 'Left') sorted[1] = h.landmarks;
+    }
+    if (!sorted[0] && !sorted[1] && hands.length > 0) sorted[0] = hands[0].landmarks;
+    latestHands = sorted;
+  }
+}
+
+// ============================================================
+// BACKEND: WebGPU (gpu-vision)
+// ============================================================
+let gpuHandTracker = null;
+let gpuReady = false;
+let gpuHandBusy = false;
+let wgpuVfcRunning = false;
+let wgpuVfcChainActive = false;
+
+async function initWebGPUBackend() {
+  if (gpuReady) { startWebGPUVfcLoop(); return true; }
+  try {
+    if (!crossOriginIsolated) {
+      console.warn('[webgpu] crossOriginIsolated is false');
+      return false;
+    }
+    if (!navigator.gpu) { console.warn('[webgpu] No navigator.gpu'); return false; }
+    const adapter = await Promise.race([
+      navigator.gpu.requestAdapter(),
+      new Promise(r => setTimeout(() => r(null), 3000))
+    ]);
+    if (!adapter) { console.warn('[webgpu] requestAdapter() failed'); return false; }
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Loading WebGPU hand tracker...';
+    const { HandTracker } = await import('../../src/pipeline.js');
+    gpuHandTracker = new HandTracker();
+    await gpuHandTracker.init(msg => { statusEl.textContent = msg; });
+    gpuReady = true;
+    statusEl.style.display = 'none';
+    startWebGPUVfcLoop();
+    return true;
+  } catch (err) {
+    console.error('WebGPU init error:', err);
+    statusEl.textContent = 'WebGPU failed: ' + err.message;
+    return false;
+  }
+}
+
+function processWebGPUHands() {
+  if (!gpuReady || gpuHandBusy) return;
+  gpuHandBusy = true;
+  gpuHandTracker.processFrame(video).then(result => {
+    if (result.hands && result.hands.some(Boolean)) {
+      handleHandResult(result.hands, { stable: true });
+    } else {
+      handleHandResult(null);
+    }
+    gpuHandBusy = false;
+  }).catch(err => {
+    console.error('WebGPU hand error:', err);
+    gpuHandBusy = false;
+  });
+}
+
+function wgpuVfcTick() {
+  wgpuVfcChainActive = false;
+  if (!wgpuVfcRunning) return;
+  if (activeBackend === 'webgpu' && gpuReady) processWebGPUHands();
+  if (video.srcObject) {
+    wgpuVfcChainActive = true;
+    video.requestVideoFrameCallback(wgpuVfcTick);
+  }
+}
+
+function startWebGPUVfcLoop() {
+  wgpuVfcRunning = true;
+  if (!wgpuVfcChainActive && video.srcObject) {
+    wgpuVfcChainActive = true;
+    video.requestVideoFrameCallback(wgpuVfcTick);
+  }
+}
+
+function stopWebGPUVfcLoop() { wgpuVfcRunning = false; }
+
+// ============================================================
+// BACKEND: MediaPipe (fallback)
+// ============================================================
+let handWorker = null;
+let mpHandReady = false;
+let mpHandIdle = true;
+let mpVfcRunning = false;
+
+function initMediaPipeBackend() {
+  if (handWorker) return;
+  handWorker = new Worker('hand-worker.js');
+  handWorker.onmessage = (e) => {
+    if (e.data.type === 'init') { mpHandReady = true; return; }
+    if (e.data.type === 'result') {
+      mpHandIdle = true;
+      handleHandResult(e.data.hands);
+    }
+  };
+  handWorker.postMessage({ type: 'init', numHands: 2 });
+}
+
+function teardownMediaPipe() {
+  if (handWorker) { handWorker.terminate(); handWorker = null; }
+  mpHandReady = false; mpHandIdle = true;
+}
+
+function mpVfcTick() {
+  if (!mpVfcRunning) return;
+  if (activeBackend === 'mediapipe' && mpHandReady && mpHandIdle) {
+    mpHandIdle = false;
+    createImageBitmap(video, { resizeWidth: 320, resizeHeight: 240 }).then(bmp => {
+      handWorker.postMessage(
+        { type: 'detect', image: bmp, timestamp: performance.now() },
+        [bmp]
+      );
+    });
+  }
+  video.requestVideoFrameCallback(mpVfcTick);
+}
+
+function startMediaPipeVfcLoop() {
+  mpVfcRunning = true;
+  if (video.srcObject) video.requestVideoFrameCallback(mpVfcTick);
+}
+
+function stopMediaPipeVfcLoop() { mpVfcRunning = false; }
+
+// ============================================================
+// Backend switching
+// ============================================================
+function syncInterpAvailability() {
+  const sel = document.getElementById('interp-select');
+  if (activeBackend === 'mediapipe') {
+    interpolationMode = '1';
+    sel.value = '1';
+    sel.disabled = true;
+    sel.style.opacity = '0.4';
+  } else {
+    interpolationMode = savedPrefs.interp || '1';
+    sel.value = interpolationMode;
+    sel.disabled = false;
+    sel.style.opacity = '1';
+  }
+}
+
+async function setBackend(backend) {
+  activeBackend = backend;
+  document.getElementById('backend-label').textContent = backend === 'webgpu' ? 'WebGPU' : 'MediaPipe';
+  latestHands = [null, null];
+
+  if (backend === 'webgpu') {
+    stopMediaPipeVfcLoop();
+    const ok = await initWebGPUBackend();
+    if (!ok) {
+      console.warn('WebGPU unavailable, falling back to MediaPipe');
+      backendSelect.value = 'mediapipe';
+      activeBackend = 'mediapipe';
+      document.getElementById('backend-label').textContent = 'MediaPipe';
+      initMediaPipeBackend();
+      startMediaPipeVfcLoop();
+    }
+  } else {
+    stopWebGPUVfcLoop();
+    initMediaPipeBackend();
+    startMediaPipeVfcLoop();
+  }
+  syncInterpAvailability();
+}
+
+backendSelect.addEventListener('change', (e) => { setBackend(e.target.value); savePref('backend', e.target.value); });
+
+// ---- Camera ----
+const startBtn = document.getElementById('start-btn');
+async function startCamera() {
+  startBtn.style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Requesting camera...';
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: 640, height: 480 }
+  });
+  video.srcObject = stream;
+  await new Promise(r => { video.onloadedmetadata = r; });
+  video.play();
+  document.getElementById('self-view').style.display = 'block';
+  document.getElementById('controls').style.display = 'block';
+  statusEl.style.display = 'none';
+  await setBackend('webgpu');
+}
+startBtn.addEventListener('click', startCamera);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && startBtn.style.display !== 'none') startCamera();
+});
+
+// ---- Render loop (decoupled from detection) ----
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let lastAnimateTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const now = performance.now();
+  const dt = Math.min((now - lastAnimateTime) / 1000, 0.05);
+  lastAnimateTime = now;
+
+  const filtered0 = filterLandmarks(0, latestHands[0]);
+  const filtered1 = filterLandmarks(1, latestHands[1]);
+
+  // Frame interpolation: lerp displayed hands toward filtered at chosen rate
+  const interp0 = advanceInterp(0, filtered0);
+  const interp1 = advanceInterp(1, filtered1);
+
+  // Particle effects: fingertip trails, velocity sparks, palm energy
+  emitHandParticles(0, interp0);
+  emitHandParticles(1, interp1);
+  updateParticles(dt);
+
+  // Palm energy webs
+  updatePalmWeb(palmWebs[0], interp0);
+  updatePalmWeb(palmWebs[1], interp1);
+
+  // Wave equation: fingertips radiate ripples across background
+  stepWaveEquation([interp0, interp1]);
+
+  // Hand meshes
+  updateHand(handGroups[0], interp0);
+  updateHand(handGroups[1], interp1);
+
+  const pulse = 0.6 + 0.4 * Math.sin(now * 0.003);
+  for (const g of handGroups) {
+    g.userData.jointMat.emissiveIntensity = 0.8 * pulse;
+    g.userData.tipMat.emissiveIntensity = 1.2 * pulse;
+  }
+
+  const handCount = (latestHands[0] ? 1 : 0) + (latestHands[1] ? 1 : 0);
+  document.getElementById('hand-count').textContent = handCount;
+
+  frameCount++;
+  if (now - lastFpsTime > 500) {
+    document.getElementById('fps').textContent = Math.round(frameCount / ((now - lastFpsTime) / 1000));
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  composer.render();
+}
+animate();
+</script>
+</body>
+</html>
