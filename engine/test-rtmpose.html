@@ -330,8 +330,10 @@ try {
   let lastHands = [null, null];
   let lastRects = [];
   let lastPipeMs = 0;
+  let paused = false;
 
   function tick() {
+    if (paused) return;
     if (switching) { video.requestVideoFrameCallback(tick); return; }
 
     // Fire-and-forget pipeline call (matches ball-toss pattern)
@@ -475,8 +477,23 @@ try {
 
   video.requestVideoFrameCallback(tick);
 
+  // Pause everything when tab is hidden, resume when visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      paused = true;
+      video.pause();
+      statusEl.textContent = 'Paused (tab hidden)';
+    } else {
+      paused = false;
+      video.play();
+      statusEl.textContent = 'Ready';
+      video.requestVideoFrameCallback(tick);
+    }
+  });
+
   // Print stats every 5 seconds
   setInterval(() => {
+    if (paused) return;
     if (currentMode === 'wgsl' && times.length > 0) {
       const sorted = [...times].sort((a, b) => a - b);
       const median = sorted[Math.floor(sorted.length / 2)];

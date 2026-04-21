@@ -76,9 +76,9 @@
   </select>
   <span class="sep" style="color:#888;">Particles</span>
   <select id="particle-mode">
+    <option value="none">None</option>
     <option value="trail">Trail</option>
     <option value="shimmer">Shimmer</option>
-    <option value="none">None</option>
   </select>
   <span class="sep" style="color:#888;">Interp</span>
   <select id="interp-select">
@@ -154,7 +154,7 @@ const backendSelect = document.getElementById('backend-select');
 // Apply saved selections to dropdowns
 document.getElementById('hand-style').value = currentStyle;
 backendSelect.value = activeBackend;
-document.getElementById('particle-mode').value = savedPrefs.particles || 'trail';
+document.getElementById('particle-mode').value = savedPrefs.particles || 'none';
 
 // ---- Three.js setup ----
 const scene = new THREE.Scene();
@@ -349,7 +349,7 @@ function emitParticle(pos, vel, size, lifetime) {
   particleLifetimes[i] = lifetime;
 }
 
-let particleMode = savedPrefs.particles || 'trail';
+let particleMode = savedPrefs.particles || 'none';
 document.getElementById('particle-mode').addEventListener('change', (e) => { particleMode = e.target.value; savePref('particles', e.target.value); });
 
 const prevTipPositions = [
@@ -615,9 +615,9 @@ function updateParticleColors() {
         float d = texture2D(uWaveState, vUv + vec2(0.0, -texel.y)).r;
 
         vec2 gradient = vec2(r - l, u - d);
-        float steepness = length(gradient) * 12.0;
-        float highlight = smoothstep(0.2, 0.7, steepness);
-        vec3 color = mix(uColor, vec3(1.0), highlight * 0.3);
+        float steepness = length(gradient) * 20.0;
+        float highlight = smoothstep(0.15, 0.5, steepness);
+        vec3 color = mix(uColor, vec3(1.0), highlight * 0.5);
         float alpha = min(steepness * uOpacity, 1.0);
 
         gl_FragColor = vec4(color, alpha);
@@ -626,7 +626,7 @@ function updateParticleColors() {
     uniforms: {
       uWaveState: { value: null },
       uColor: { value: new THREE.Color(STYLES.energy.emissive) },
-      uOpacity: { value: 0.35 },
+      uOpacity: { value: 0.5 },
       uResolution: { value: new THREE.Vector2(WAVE_GRID, WAVE_GRID) },
     },
     transparent: true,
@@ -640,44 +640,76 @@ function updateParticleColors() {
 })();
 
 function worldToWaveUV(worldPos) {
-  // Perspective correction: plane is at z=-2, hands at z≈0, camera at z=5
-  // A point at (hx,hy,0) projects to the same screen pixel as (hx*7/5, hy*7/5, -2)
-  const s = 7 / 5;
+  const camZ = 5, planeZ = -2;
+  const s = (camZ - planeZ) / (camZ - worldPos.z);
   return new THREE.Vector2((worldPos.x * s + 8) / 16, (worldPos.y * s + 5) / 10);
 }
 
-function stepWaveEquation(filteredHands) {
-  const sources = waveSimMaterial.uniforms.uSources.value;
-  let count = 0;
+function getWaveTipUVs(filteredHands) {
+  const tips = [];
   for (let h = 0; h < 2; h++) {
     const lms = filteredHands[h];
-    if (!lms) { prevWaveTips[h].fill(null); continue; }
+    if (!lms) { tips.push(null); continue; }
+    const handTips = [];
     for (let w = 0; w < WAVE_FINGERS.length; w++) {
-      if (count >= 10) break;
       const t = WAVE_FINGERS[w];
       const worldPos = lmToWorld(lms[FINGERTIPS[t]]);
-      const uv = worldToWaveUV(worldPos);
-      const prev = prevWaveTips[h][t];
-      let force = 0.001;
-      if (prev) {
-        const speed = Math.hypot(uv.x - prev.x, uv.y - prev.y);
-        force += Math.min(speed * 2.0, 0.06);
-      }
-      sources[count].set(uv.x, uv.y, force);
-      prevWaveTips[h][t] = { x: uv.x, y: uv.y };
-      count++;
+      handTips.push(worldToWaveUV(worldPos));
     }
+    tips.push(handTips);
   }
-  for (let i = count; i < 10; i++) sources[i].set(-99, -99, 0);
-  waveSimMaterial.uniforms.uNumSources.value = count;
+  return tips;
+}
 
-  const readTarget = waveTargets[currentWaveTarget];
-  const writeTarget = waveTargets[1 - currentWaveTarget];
-  waveSimMaterial.uniforms.uPrevState.value = readTarget.texture;
-  renderer.setRenderTarget(writeTarget);
-  renderer.render(waveSimScene, waveSimCamera);
-  renderer.setRenderTarget(null);
-  currentWaveTarget = 1 - currentWaveTarget;
+const prevWaveUVs = [null, null];
+
+const BASE_WAVE_SPEED = 0.3;
+
+function stepWaveEquation(filteredHands) {
+  const curUVs = getWaveTipUVs(filteredHands);
+  const substeps = Math.max(1, parseInt(interpolationMode) || (interpolationMode === 'adaptive' ? 3 : 1));
+  const sources = waveSimMaterial.uniforms.uSources.value;
+  waveSimMaterial.uniforms.uWaveSpeed.value = BASE_WAVE_SPEED / substeps;
+
+  for (let step = 0; step < substeps; step++) {
+    const t = substeps === 1 ? 1 : (step + 1) / substeps;
+    let count = 0;
+
+    for (let h = 0; h < 2; h++) {
+      if (!curUVs[h]) { prevWaveTips[h].fill(null); continue; }
+      for (let w = 0; w < curUVs[h].length; w++) {
+        if (count >= 10) break;
+        const fi = WAVE_FINGERS[w];
+        const cur = curUVs[h][w];
+        const startUV = prevWaveUVs[h]?.[w] || cur;
+        const uvx = startUV.x + (cur.x - startUV.x) * t;
+        const uvy = startUV.y + (cur.y - startUV.y) * t;
+
+        const prev = prevWaveTips[h][fi];
+        let force = 0.003 / substeps;
+        if (prev) {
+          const speed = Math.hypot(uvx - prev.x, uvy - prev.y);
+          force += Math.min(speed * 4.0, 0.12) / substeps;
+        }
+        sources[count].set(uvx, uvy, force);
+        prevWaveTips[h][fi] = { x: uvx, y: uvy };
+        count++;
+      }
+    }
+    for (let i = count; i < 10; i++) sources[i].set(-99, -99, 0);
+    waveSimMaterial.uniforms.uNumSources.value = count;
+
+    const readTarget = waveTargets[currentWaveTarget];
+    const writeTarget = waveTargets[1 - currentWaveTarget];
+    waveSimMaterial.uniforms.uPrevState.value = readTarget.texture;
+    renderer.setRenderTarget(writeTarget);
+    renderer.render(waveSimScene, waveSimCamera);
+    renderer.setRenderTarget(null);
+    currentWaveTarget = 1 - currentWaveTarget;
+  }
+
+  prevWaveUVs[0] = curUVs[0] ? curUVs[0].map(v => ({ x: v.x, y: v.y })) : null;
+  prevWaveUVs[1] = curUVs[1] ? curUVs[1].map(v => ({ x: v.x, y: v.y })) : null;
   waveDisplayMaterial.uniforms.uWaveState.value = waveTargets[currentWaveTarget].texture;
 }
 
@@ -722,7 +754,7 @@ function filterLandmarks(handIdx, landmarks) {
 }
 
 // ---- Frame interpolation (from ball-toss) ----
-let interpolationMode = (activeBackend === 'mediapipe') ? '1' : (savedPrefs.interp || '1');
+let interpolationMode = (activeBackend === 'mediapipe') ? '1' : (savedPrefs.interp || 'adaptive');
 const interpSelect = document.getElementById('interp-select');
 interpSelect.value = interpolationMode;
 if (activeBackend === 'mediapipe') { interpSelect.disabled = true; interpSelect.style.opacity = '0.4'; }
@@ -937,7 +969,7 @@ function syncInterpAvailability() {
     sel.disabled = true;
     sel.style.opacity = '0.4';
   } else {
-    interpolationMode = savedPrefs.interp || '1';
+    interpolationMode = savedPrefs.interp || 'adaptive';
     sel.value = interpolationMode;
     sel.disabled = false;
     sel.style.opacity = '1';
@@ -992,6 +1024,21 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && startBtn.style.display !== 'none') startCamera();
 });
 
+// ---- Visibility: pause everything when tab is hidden ----
+let tabVisible = true;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    tabVisible = false;
+    stopWebGPUVfcLoop();
+    stopMediaPipeVfcLoop();
+  } else {
+    tabVisible = true;
+    lastAnimateTime = performance.now();
+    if (activeBackend === 'webgpu') startWebGPUVfcLoop();
+    else startMediaPipeVfcLoop();
+  }
+});
+
 // ---- Render loop (decoupled from detection) ----
 let frameCount = 0;
 let lastFpsTime = performance.now();
@@ -999,6 +1046,7 @@ let lastAnimateTime = performance.now();
 
 function animate() {
   requestAnimationFrame(animate);
+  if (!tabVisible) return;
 
   const now = performance.now();
   const dt = Math.min((now - lastAnimateTime) / 1000, 0.05);
