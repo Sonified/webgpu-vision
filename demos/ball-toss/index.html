@@ -174,9 +174,109 @@
     display: none; width: 240px;
   }
   #self-view canvas { display: block; width: 100%; height: auto; }
+
+  /* Hamburger + settings drawer -- slide-in from the left, modeled after
+     space-weather-audio's drawer pattern. Contains the filter + interp panels
+     that used to float in the upper-right. */
+  #hamburger-btn {
+    position: fixed; top: 12px; left: 12px; z-index: 1100;
+    /* Height set from JS to match #controls exactly. */
+    width: 44px; padding: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(10,10,26,0.92); border: 1px solid #333;
+    border-radius: 6px;
+    color: #ccc; font-size: 1.35rem; line-height: 1;
+    cursor: pointer; user-select: none;
+    transition: color 0.15s, border-color 0.15s, transform 0.25s ease;
+  }
+  #hamburger-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
+  /* Shift #controls right of the hamburger (44px wide + 8px gap + 12px offset = 64px). */
+  #controls { left: 64px !important; transition: transform 0.25s ease; }
+  /* HUD is bottom-left -- give it a transition so it slides smoothly with the rest. */
+  #hud { transition: transform 0.25s ease; }
+  /* When the drawer opens, slide the hamburger, #controls, AND the HUD to the
+     right so the drawer doesn't overlap them. 260px drawer + 8px gap = 268px. */
+  body.drawer-open #hamburger-btn,
+  body.drawer-open #controls,
+  body.drawer-open #hud {
+    transform: translateX(268px);
+  }
+  #settings-drawer {
+    position: fixed; top: 0; left: 0;
+    width: 260px; height: 100%;
+    background: #1e1e1e; border-right: 1px solid #444;
+    z-index: 1100;
+    transform: translateX(-100%); transition: transform 0.25s ease;
+    overflow-y: auto; font-size: 13px; color: #ddd;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent;
+    padding: 56px 14px 14px; box-sizing: border-box;
+  }
+  #settings-drawer::-webkit-scrollbar { width: 5px; }
+  #settings-drawer::-webkit-scrollbar-track { background: transparent; }
+  #settings-drawer::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+  #settings-drawer.open { transform: translateX(0); }
+  /* When reparented into the drawer, panels become normal block children. */
+  #settings-drawer > #filter-controls,
+  #settings-drawer > #interp-controls,
+  #settings-drawer > #tracking-controls {
+    position: static; top: auto; right: auto;
+    display: block; margin: 0 0 14px 0; background: transparent;
+    border: none; border-radius: 0; padding: 0;
+    min-width: 0;
+  }
+  /* Shared base styling for tracking-controls (lives outside the drawer until
+     revealSceneUI moves it in). Matches filter/interp panels when floating. */
+  #tracking-controls {
+    position: fixed; right: 12px; z-index: 10;
+    font-size: 0.9rem; color: #ccc;
+    background: rgba(10,10,26,0.92); padding: 10px 14px; border-radius: 6px;
+    border: 1px solid #333; display: none; min-width: 220px;
+  }
+  #settings-drawer > *:last-child { margin-bottom: 0; }
 </style>
 </head>
 <body>
+
+<!-- Log gate state: category toggles persist to localStorage. Gated call sites
+     in main-thread code import { log, makeLogger } from src/log-gates.js and
+     read from the same state via window.__wgvLogGates.state. Workers get
+     their own copy via the spawn URL (?gates=) + postMessage for live updates. -->
+<script>
+(function() {
+  // Keep in sync with src/log-gates.js
+  const CATS = [
+    { id: 'lifecycle', label: 'Lifecycle' },
+    { id: 'performance', label: 'Performance' },
+    { id: 'tracking', label: 'Tracking' },
+  ];
+
+  const KEY = 'wgv_log_gates';
+  let gates;
+  try { gates = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { gates = {}; }
+  for (const c of CATS) if (!(c.id in gates)) gates[c.id] = true; // default all on
+
+  // Worker registry for live gate updates. Pipelines register their workers
+  // here so gate changes propagate without needing to reload the page.
+  const workers = new Set();
+
+  window.__wgvLogGates = {
+    categories: CATS,
+    state: gates,
+    set(catId, enabled) {
+      gates[catId] = !!enabled;
+      try { localStorage.setItem(KEY, JSON.stringify(gates)); } catch {}
+      for (const w of workers) {
+        try { w.postMessage({ type: 'log_gates', gates: { ...gates } }); } catch {}
+      }
+    },
+    registerWorker(w) { workers.add(w); },
+    unregisterWorker(w) { workers.delete(w); },
+  };
+})();
+</script>
+
+<button id="hamburger-btn" title="Settings (press ~)">☰</button>
+<div id="settings-drawer"></div>
 
 <div id="controls">
   <span style="color:#888;">Backend</span>
@@ -238,6 +338,12 @@
   </div>
 </div>
 
+<div id="tracking-controls" style="display:none;">
+  <div class="section-label" style="color:#4fc3f7; font-weight:600; font-size:0.95rem; margin-bottom:4px;">Hand Tracking</div>
+  <div class="param-row" style="display:flex; align-items:center; margin-bottom:3px;"><span class="param-name" style="width:90px; color:#888; font-size:0.85rem;">Dup dist</span><input type="range" id="dup-dist" min="5" max="80" step="1" value="25" style="flex:1; height:4px; accent-color:#4fc3f7; cursor:pointer;"><span class="param-val" id="dup-dist-val" style="width:40px; text-align:right; color:#4fc3f7; font-size:0.8rem; font-weight:600;">25</span></div>
+  <div style="font-size:0.7rem; color:#666; margin-top:2px;">px at which two slots count as duplicate</div>
+</div>
+
 
 <div id="status"></div>
 <img id="start-logo" src="../../images/WebGPU_Vision_Logo.png" alt="WebGPU Vision">
@@ -280,6 +386,7 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { log } from '../../src/log-gates.js';
 
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
@@ -362,7 +469,7 @@ renderer.domElement.addEventListener('webglcontextlost', (e) => {
   console.error('[lifecycle] WebGL context LOST');
 });
 renderer.domElement.addEventListener('webglcontextrestored', () => {
-  console.log('[lifecycle] WebGL context restored');
+  log('lifecycle', '[lifecycle] WebGL context restored');
 });
 
 // Lighting
@@ -845,6 +952,22 @@ parallaxDepthSlider.addEventListener('input', (e) => {
   setProfileValue('parallax-depth', parallaxDepth);
 });
 
+// Hand-tracking duplicate-detection distance (pipeline.js). Persisted to
+// localStorage so the value survives reloads; also pushed into an existing
+// HandTracker instance if one is already live.
+const dupDistSlider = document.getElementById('dup-dist');
+const dupDistVal = document.getElementById('dup-dist-val');
+const savedDupInit = parseInt(localStorage.getItem('wgv_dup_dist'));
+const initDup = Number.isFinite(savedDupInit) && savedDupInit > 0 ? savedDupInit : 25;
+dupDistSlider.value = initDup;
+dupDistVal.textContent = initDup;
+dupDistSlider.addEventListener('input', (e) => {
+  const v = parseInt(e.target.value);
+  dupDistVal.textContent = v;
+  localStorage.setItem('wgv_dup_dist', String(v));
+  if (gpuHandTracker) gpuHandTracker.dupDistPx = v;
+});
+
 // Re-load all profiled values from the currently active profile and push
 // them into the live state (filterParams, the One Euro filters, parallax
 // globals) and into the slider UIs. Called when backend or faceMode
@@ -1006,7 +1129,7 @@ let faceCropCanvas = null;          // reusable OffscreenCanvas for black-padded
 let faceRoiState = false;           // sticky: is auto-mode currently in crop state? Hysteresis below.
 
 function handleFaceResult(face) {
-  if (!handleFaceResult._logged) { handleFaceResult._logged = true; console.log('[lifecycle] handleFaceResult first call'); }
+  if (!handleFaceResult._logged) { handleFaceResult._logged = true; log('lifecycle', '[lifecycle] handleFaceResult first call'); }
   if (!face) return;
   const now = performance.now();
   if (face.bbox && lastFacePos && now - lastFacePos.t < FACE_RECOVERY_MS) {
@@ -1100,16 +1223,87 @@ function handleFaceResult(face) {
   interpFramesLeft = headMotion.currentMode;
 }
 
-function handleHandResult(landmarks) {
-  if (!handleHandResult._logged) { handleHandResult._logged = true; console.log('[lifecycle] handleHandResult first call'); }
+// MediaPipe fallback: its HandLandmarker returns hands in arbitrary order and
+// we need to assign them to stable visual slots. Uses handedness labels when
+// available, falls back to spatial proximity against last frame's wrist
+// positions for the ambiguous cases (prayer hands, one-handed tracking).
+function sortHandsByHandedness(hands) {
+  const slotted = [null, null];
+  const validHands = hands ? hands.filter(Boolean) : [];
+  if (validHands.length === 0) return slotted;
+
+  if (validHands.length >= 2) {
+    const leftCount = validHands.filter(h => h.handedness === 'Left').length;
+    const rightCount = validHands.filter(h => h.handedness === 'Right').length;
+    if (leftCount === 1 && rightCount === 1) {
+      for (const h of validHands) {
+        if (h.handedness === 'Left') slotted[0] = h;
+        else if (h.handedness === 'Right') slotted[1] = h;
+      }
+      return slotted;
+    }
+    // Both same handedness (prayer hands / classifier glitch): assign each
+    // to the slot whose previous wrist is closest.
+    const h0 = validHands[0], h1 = validHands[1];
+    const last0 = currentHands[0] ? currentHands[0][0] : null;
+    const last1 = currentHands[1] ? currentHands[1][0] : null;
+    const w0 = h0.landmarks[0], w1 = h1.landmarks[0];
+    const d = (a, b) => {
+      if (!a || !b) return Infinity;
+      const dx = a.x - b.x, dy = a.y - b.y;
+      return dx * dx + dy * dy;
+    };
+    if (last0 && last1) {
+      const keep = d(w0, last0) + d(w1, last1);
+      const swap = d(w0, last1) + d(w1, last0);
+      if (keep <= swap) { slotted[0] = h0; slotted[1] = h1; }
+      else { slotted[0] = h1; slotted[1] = h0; }
+    } else if (last0) {
+      if (d(w0, last0) <= d(w1, last0)) { slotted[0] = h0; slotted[1] = h1; }
+      else { slotted[0] = h1; slotted[1] = h0; }
+    } else if (last1) {
+      if (d(w0, last1) <= d(w1, last1)) { slotted[1] = h0; slotted[0] = h1; }
+      else { slotted[1] = h1; slotted[0] = h0; }
+    } else {
+      slotted[0] = h0;
+      slotted[1] = h1;
+    }
+    return slotted;
+  }
+
+  // Single hand: prefer the slot that had a hand last frame.
+  const h = validHands[0];
+  const last0 = !!currentHands[0];
+  const last1 = !!currentHands[1];
+  if (last1 && !last0) slotted[1] = h;
+  else if (last0 && !last1) slotted[0] = h;
+  else if (h.handedness === 'Right') slotted[1] = h;
+  else slotted[0] = h;
+  return slotted;
+}
+
+function handleHandResult(hands, opts = {}) {
+  if (!handleHandResult._logged) { handleHandResult._logged = true; log('lifecycle', '[lifecycle] handleHandResult first call'); }
   const now = performance.now();
-  const visibleHandCount = landmarks ? Math.min(landmarks.length, 2) : 0;
+
+  // Two paths:
+  //  - `stable: true` (WebGPU Vision): pipeline.js already did centroid
+  //    identity tracking. hands is a fixed 2-element array, index = slot.
+  //  - Default (MediaPipe): hands is a dense array in arbitrary order;
+  //    sort by handedness with spatial fallback.
+  const slotted = opts.stable
+    ? [hands && hands[0] ? hands[0] : null, hands && hands[1] ? hands[1] : null]
+    : sortHandsByHandedness(hands);
+
+  const visibleHandCount = (slotted[0] ? 1 : 0) + (slotted[1] ? 1 : 0);
   if (visibleHandCount > 0) {
     handLastSeen = now;
     lastHandCount = visibleHandCount;
   }
+
   for (let h = 0; h < 2; h++) {
-    if (!landmarks || h >= landmarks.length) {
+    const entry = slotted[h];
+    if (!entry) {
       currentHands[h] = null;
       displayedHands[h] = null;
       handStates[h].pinching = false;
@@ -1120,7 +1314,7 @@ function handleHandResult(landmarks) {
       for (const joint of handFilters[h]) for (const f of joint) f.reset();
       continue;
     }
-    const hand = landmarks[h];
+    const hand = entry.landmarks;
     // Filter each landmark
     const filtered = hand.map((lm, j) => ({
       x: handFilters[h][j][0].filter(lm.x, now),
@@ -1345,7 +1539,7 @@ function initMediaPipeBackend(numHands) {
     if (e.data.type === 'init') { handReady = true; updateStatus(); }
     if (e.data.type === 'result') {
       if (mpHandT0) _bench.handLatencies.push(performance.now() - mpHandT0);
-      handleHandResult(e.data.landmarks);
+      handleHandResult(e.data.hands);
       handIdle = true;
     }
   };
@@ -1403,7 +1597,7 @@ let wgpuInitPromise = null;
 async function initWebGPUBackend(silent = false) {
   let preloadLogged = false;
   const setStatus = silent
-    ? (msg) => { if (!preloadLogged) { console.log('[preload] loading...'); preloadLogged = true; } }
+    ? (msg) => { if (!preloadLogged) { log('lifecycle', '[preload] loading...'); preloadLogged = true; } }
     : (msg) => { statusEl.textContent = msg; };
   if (wgpuInitPromise) {
     const ok = await wgpuInitPromise;
@@ -1411,34 +1605,38 @@ async function initWebGPUBackend(silent = false) {
     return ok;
   }
   wgpuInitPromise = (async () => {
-    console.log(`[webgpu-check] crossOriginIsolated=${crossOriginIsolated} origin=${location.origin}`);
+    log('lifecycle', `[webgpu-check] crossOriginIsolated=${crossOriginIsolated} origin=${location.origin}`);
     if (!crossOriginIsolated) {
-      console.log('[webgpu-check] BLOCKED: crossOriginIsolated is false');
+      log('lifecycle', '[webgpu-check] BLOCKED: crossOriginIsolated is false');
       return false;
     }
     try {
       // Pre-flight: check if this browser/device can even run WebGPU.
       // Safari iOS may hang on requestAdapter() so we race it with a timeout.
       const gpuAvail = !!navigator.gpu;
-      console.log(`[webgpu-check] navigator.gpu=${gpuAvail} crossOriginIsolated=${crossOriginIsolated}`);
+      log('lifecycle', `[webgpu-check] navigator.gpu=${gpuAvail} crossOriginIsolated=${crossOriginIsolated}`);
       if (!gpuAvail) { console.warn('[webgpu-check] No navigator.gpu'); return false; }
       const adapter = await Promise.race([
         navigator.gpu.requestAdapter(),
         new Promise(r => setTimeout(() => r(null), 3000))
       ]);
-      console.log(`[webgpu-check] adapter=${!!adapter}`);
+      log('lifecycle', `[webgpu-check] adapter=${!!adapter}`);
       if (!adapter) { console.warn('[webgpu-check] requestAdapter() failed or timed out'); return false; }
       setStatus('Loading WebGPU modules...');
       const { HandTracker } = await import('../../src/pipeline.js');
       const { FaceTracker } = await import('../../src/face-pipeline.js');
       gpuHandTracker = new HandTracker();
       gpuFaceTracker = new FaceTracker(1);
+      // Apply the user-tunable duplicate-detection distance (persisted via
+      // the hamburger-drawer slider). Defaults to 25px on first load.
+      const savedDup = parseInt(localStorage.getItem('wgv_dup_dist'));
+      if (Number.isFinite(savedDup) && savedDup > 0) gpuHandTracker.dupDistPx = savedDup;
       setStatus('Loading WebGPU hand tracker...');
       await gpuHandTracker.init(setStatus);
       setStatus('Loading WebGPU face tracker...');
       await gpuFaceTracker.init(setStatus);
       gpuReady = true;
-      if (silent) console.log('[preload] ready');
+      if (silent) log('lifecycle', '[preload] ready');
       return true;
     } catch (err) {
       console.error('WebGPU init error:', err);
@@ -1467,7 +1665,7 @@ const _bench = {
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
-      console.log(`[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      log('performance', `[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);
@@ -1475,7 +1673,7 @@ const _bench = {
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
       const faceTag = faceMode === 'landmark' ? 'LAN' : 'DET';
-      console.log(`[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      log('performance', `[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     this.handLatencies = [];
     this.faceLatencies = [];
@@ -1495,7 +1693,7 @@ const _bench = {
 let wgpuVfcRunning = false;
 let wgpuVfcChainActive = false; // is an rVFC callback currently queued
 function wgpuVfcTick() {
-  if (!wgpuVfcTick._logged) { wgpuVfcTick._logged = true; console.log('[lifecycle] wgpuVfcTick first fire'); }
+  if (!wgpuVfcTick._logged) { wgpuVfcTick._logged = true; log('lifecycle', '[lifecycle] wgpuVfcTick first fire'); }
   wgpuVfcChainActive = false;
   if (!wgpuVfcRunning) return;
   if (activeBackend === 'webgpu' && gpuReady) {
@@ -1513,7 +1711,7 @@ function startWebGPUVfcLoop() {
   // (e.g. from preload then again after camera arrives) are idempotent.
   if (!wgpuVfcChainActive && video.srcObject) {
     wgpuVfcChainActive = true;
-    console.log('[lifecycle] wgpu rVFC chain started');
+    log('lifecycle', '[lifecycle] wgpu rVFC chain started');
     video.requestVideoFrameCallback(wgpuVfcTick);
   }
 }
@@ -1546,7 +1744,7 @@ function _p1MaybeReport(now) {
   const hps  = _p1HandCalls / dt;
   const fr   = vfps > 0 ? (fps / vfps).toFixed(2) : '?';
   const hr   = vfps > 0 ? (hps / vfps).toFixed(2) : '?';
-  console.log(`[FRAME RATE] video: ${vfps.toFixed(1)} fps | face: ${fps.toFixed(1)} calls/s (${fr}x oversampling) | hand: ${hps.toFixed(1)} calls/s (${hr}x oversampling)`);
+  log('performance', `[FRAME RATE] video: ${vfps.toFixed(1)} fps | face: ${fps.toFixed(1)} calls/s (${fr}x oversampling) | hand: ${hps.toFixed(1)} calls/s (${hr}x oversampling)`);
   _p1LastReport = now;
   _p1VideoFrames = 0;
   _p1FaceCalls = 0;
@@ -1566,8 +1764,11 @@ function processWebGPUHands() {
   gpuHandTracker.processFrame(video).then(result => {
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
-    if (result.hands && result.hands.length > 0) {
-      handleHandResult(result.hands.map(h => h.landmarks));
+    // WebGPU Vision pipeline returns a fixed 2-element `hands` array in
+    // stable slot order (centroid-based identity tracking). Pass `stable:true`
+    // so handleHandResult skips its MediaPipe-only handedness sort.
+    if (result.hands && result.hands.some(Boolean)) {
+      handleHandResult(result.hands, { stable: true });
     } else {
       handleHandResult(null);
     }
@@ -1584,7 +1785,7 @@ faceModeSelect.value = faceMode;
 faceModeSelect.addEventListener('change', (e) => {
   faceMode = e.target.value;
   setSetting('faceMode', faceMode);
-  console.log('[BENCH] Face mode switched to:', faceMode);
+  log('performance', '[BENCH] Face mode switched to:', faceMode);
   // MediaPipe worker holds both tasks; tell it which one to run from now on.
   // WebGPU path reads faceMode directly each frame in processWebGPUFace().
   if (activeBackend === 'mediapipe' && faceWorker) {
@@ -1670,7 +1871,7 @@ function processWebGPUFace() {
     // DEBUG: only log on state changes to avoid console spam.
     if (faceRoi === 'auto' && prevRoiState !== faceRoiState) {
       const lp = lastFacePos ? `pos=(${lastFacePos.cx.toFixed(3)},${lastFacePos.cy.toFixed(3)})` : 'pos=null';
-      console.log(`[roi] ${lp} ${prevRoiState ? 'crop' : 'full'}→${faceRoiState ? 'crop' : 'full'} reason="${decisionReason}"`);
+      log('tracking', `[roi] ${lp} ${prevRoiState ? 'crop' : 'full'}→${faceRoiState ? 'crop' : 'full'} reason="${decisionReason}"`);
     }
     // HUD status: show the mode + whether cropping is active this frame.
     // 'off' / 'on' show the mode verbatim; 'auto' shows CROP or FULL depending
@@ -1833,8 +2034,8 @@ let lastAnimateTimestamp = -1;
 function animate(timestamp) {
   if (!animate._n) animate._n = 0;
   animate._n++;
-  if (animate._n === 1) console.log('[lifecycle] animate() first call');
-  if (animate._n === 3) console.log('[lifecycle] animate() rAF chain alive (frame 3)');
+  if (animate._n === 1) log('lifecycle', '[lifecycle] animate() first call');
+  if (animate._n === 3) log('lifecycle', '[lifecycle] animate() rAF chain alive (frame 3)');
   // Dedupe parallel animate chains: when the tab is hidden then re-shown,
   // the throttled-old rAF and the visibilitychange-spawned new rAF can both
   // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
@@ -1943,7 +2144,7 @@ function animate(timestamp) {
     animate._lastHeartbeat = now;
     const hd = now - headLastSeen <= 500;
     const nh = currentHands.filter(h => h).length;
-    console.log(`[heartbeat] animate alive | head=${hd ? 'YES' : 'NO'} (lastSeen=${Math.round(now - headLastSeen)}ms ago) hands=${nh} camX=${camera.position.x.toFixed(2)} fps=${document.getElementById('fps').textContent}`);
+    log('performance', `[heartbeat] animate alive | head=${hd ? 'YES' : 'NO'} (lastSeen=${Math.round(now - headLastSeen)}ms ago) hands=${nh} camX=${camera.position.x.toFixed(2)} fps=${document.getElementById('fps').textContent}`);
   }
 
   // HUD -- throttle to 10fps and use last-seen timeouts to smooth async ML gaps
@@ -1952,7 +2153,7 @@ function animate(timestamp) {
     if (!animate._hudLogged) {
       animate._hudLogged = true;
       const hands = currentHands.filter(h => h).length;
-      console.log(`[lifecycle] first HUD update: headLastSeen=${headLastSeen.toFixed(0)} headPos=(${headPos.x.toFixed(3)},${headPos.y.toFixed(3)},${headPos.z.toFixed(3)}) hands=${hands} backend=${activeBackend}`);
+      log('lifecycle', `[lifecycle] first HUD update: headLastSeen=${headLastSeen.toFixed(0)} headPos=(${headPos.x.toFixed(3)},${headPos.y.toFixed(3)},${headPos.z.toFixed(3)}) hands=${hands} backend=${activeBackend}`);
     }
     const headEl = document.getElementById('head-pos');
     const headDetected = now - headLastSeen <= HEAD_TIMEOUT;
@@ -2095,7 +2296,7 @@ numHandsSelect.addEventListener('change', (e) => {
     handWorker = new Worker('hand-worker.js');
     handWorker.onmessage = (ev) => {
       if (ev.data.type === 'init') { handReady = true; updateStatus(); }
-      if (ev.data.type === 'result') { handleHandResult(ev.data.landmarks); handIdle = true; }
+      if (ev.data.type === 'result') { handleHandResult(ev.data.hands); handIdle = true; }
     };
     handWorker.postMessage({ type: 'init', numHands });
   }
@@ -2127,6 +2328,34 @@ parallaxSelect.addEventListener('change', (e) => {
 // filter/interp panels, and self-view to keep the screen uncluttered.
 const isIPhone = /iPhone/i.test(navigator.userAgent);
 
+/** Build the "Log Output" section that appears at the bottom of the settings
+ *  drawer. Each category has a checkbox that writes through to localStorage
+ *  via the window.__wgvLogGates helper set up in the early inline script. */
+function buildLogGatesPanel() {
+  const wrap = document.createElement('div');
+  wrap.id = 'log-gates';
+  const gates = window.__wgvLogGates;
+  const header = document.createElement('div');
+  header.className = 'section-label';
+  header.style.cssText = 'color:#4fc3f7; font-weight:600; font-size:0.95rem; margin-bottom:6px;';
+  header.textContent = 'Log Output';
+  wrap.appendChild(header);
+  for (const cat of gates.categories) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:2px 0; cursor:pointer; font-size:0.85rem; color:#ccc;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!gates.state[cat.id];
+    cb.addEventListener('change', () => gates.set(cat.id, cb.checked));
+    row.appendChild(cb);
+    const span = document.createElement('span');
+    span.textContent = cat.label;
+    row.appendChild(span);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 // Reveal the in-game UI (HUD, controls, etc) and start the render loop.
 // Safe to call before the camera or ML models are ready -- the animate()
 // loop just renders the empty 3D scene until tracking comes online.
@@ -2134,24 +2363,37 @@ function revealSceneUI() {
   document.getElementById('controls').style.display = 'block';
   if (!isIPhone) {
     document.getElementById('hud').style.display = 'block';
+    // Move the three upper-right panels into the hamburger drawer (one-time reparent).
+    const drawer = document.getElementById('settings-drawer');
     const filterEl = document.getElementById('filter-controls');
     const interpEl = document.getElementById('interp-controls');
+    const trackEl = document.getElementById('tracking-controls');
+    if (!drawer.dataset.populated) {
+      drawer.appendChild(filterEl);
+      drawer.appendChild(interpEl);
+      drawer.appendChild(trackEl);
+      drawer.appendChild(buildLogGatesPanel());
+      drawer.dataset.populated = '1';
+    }
     filterEl.style.display = 'block';
     interpEl.style.display = 'block';
-    syncInterpAdaptiveAvailability();
-    // Position interp-controls directly beneath filter-controls. Done after
-    // both are visible so the height measurement is accurate. requestAnimationFrame
-    // ensures the layout has flushed before we read getBoundingClientRect.
+    trackEl.style.display = 'block';
+    const hamburger = document.getElementById('hamburger-btn');
+    hamburger.style.display = 'flex';
+    // Match the hamburger's height to #controls so they bottom-align.
+    // Done in rAF so #controls has laid out with its final height.
     requestAnimationFrame(() => {
-      const r = filterEl.getBoundingClientRect();
-      interpEl.style.top = `${Math.round(r.bottom + 8)}px`;
+      const ctrlEl = document.getElementById('controls');
+      const h = ctrlEl.offsetHeight;
+      if (h > 0) hamburger.style.height = h + 'px';
     });
+    syncInterpAdaptiveAvailability();
   }
   animate();
 }
 
 async function startCamera() {
-  console.log('[lifecycle] startCamera()');
+  log('lifecycle', '[lifecycle] startCamera()');
   const btn = document.getElementById('start-btn');
   const logo = document.getElementById('start-logo');
   btn.classList.add('fade-out');
@@ -2188,8 +2430,15 @@ async function loadCameraAndModels() {
     video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 60 }, latencyMode: 'realtime' }
   });
   video.srcObject = stream;
-  await video.play();
-  console.log(`[lifecycle] camera live (${video.videoWidth}x${video.videoHeight})`);
+  // AbortError from play() fires when the video element is interrupted by
+  // another load (common during fast reloads / backend swaps). Benign: the
+  // video still plays. Any other error rethrows so the status UI surfaces it.
+  try {
+    await video.play();
+  } catch (e) {
+    if (e.name !== 'AbortError') throw e;
+  }
+  log('lifecycle', `[lifecycle] camera live (${video.videoWidth}x${video.videoHeight})`);
 
   // Size self-view canvas to match actual video aspect ratio
   if (video.videoWidth && video.videoHeight) {
@@ -2304,9 +2553,20 @@ document.getElementById('start-btn').addEventListener('click', startCamera);
     });
   }
 }
+function toggleSettingsDrawer() {
+  const drawer = document.getElementById('settings-drawer');
+  if (!drawer || !drawer.dataset.populated) return;
+  const open = drawer.classList.toggle('open');
+  document.body.classList.toggle('drawer-open', open);
+}
+
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startCamera();
+  // `~` (or `` ` `` without shift) toggles the settings drawer.
+  if (e.key === '~' || e.key === '`') toggleSettingsDrawer();
 });
+
+document.getElementById('hamburger-btn').addEventListener('click', toggleSettingsDrawer);
 
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
