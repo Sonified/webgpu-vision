@@ -110,7 +110,8 @@ async function initGPU() {
     conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
     gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
     add: await mkP('add'), pad_channels: await mkP('pad_channels'),
-    fused_block: await mkP('fused_block'), transpose_nhwc: await mkP('transpose_nhwc'),
+    fused_block: await mkP('fused_block'), fused_block_tiled: await mkP('fused_block_tiled'),
+    transpose_nhwc: await mkP('transpose_nhwc'),
   };
 
   // Create runner and compile

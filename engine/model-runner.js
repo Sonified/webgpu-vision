@@ -71,6 +71,7 @@ export class ModelRunner {
     this._ubIdx = 0; // reset uniform buffer pool for this run
 
     // Dispatch helper: executes AND records if compiling
+    let _dispatchLabel = '';
     const dispatch = (enc, pipeline, bindGroup, x, y, z) => {
       const wx = x|0, wy = (y||1)|0, wz = (z||1)|0;
       const pass = enc.beginComputePass();
@@ -79,7 +80,7 @@ export class ModelRunner {
       pass.dispatchWorkgroups(wx, wy, wz);
       pass.end();
       if (this._recording) {
-        this._steps.push({ type: 'dispatch', pipeline, bindGroup, x: wx, y: wy, z: wz });
+        this._steps.push({ type: 'dispatch', pipeline, bindGroup, x: wx, y: wy, z: wz, label: _dispatchLabel });
       }
     };
     const copyBuf = (enc, src, srcOff, dst, dstOff, bytes) => {
@@ -275,8 +276,10 @@ export class ModelRunner {
         const pb = this._getUniformBuf(desc.byteLength);
         device.queue.writeBuffer(pb, 0, desc);
 
-        dispatch(enc, this.P.fused_block, device.createBindGroup({
-          layout: this.P.fused_block.getBindGroupLayout(0),
+        _dispatchLabel = `fused_block_${oC}ch_${oH}x${oW}`;
+        const fbPipeline = (oH <= 8 && this.P.fused_block_tiled) ? this.P.fused_block_tiled : this.P.fused_block;
+        dispatch(enc, fbPipeline, device.createBindGroup({
+          layout: fbPipeline.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
             { binding: 1, resource: { buffer: tensors[dwNode.inputs[0]] } },
@@ -336,19 +339,43 @@ export class ModelRunner {
           i++;
         }
 
-        // Check for fused Add before activation (pattern: Conv -> Add -> Clip/PRelu)
-        // Actually in hand landmark: Conv(project) -> Add is the pattern
-        // Let's check if NEXT node after possible activation is Add, and the Add's second input is this conv's output
-        // For now: don't fuse Add here, handle separately
+        // Check for fused residual Add: Conv -> [Activation] -> Add(conv_out, skip)
+        // The conv output is one input to the Add; the other is the skip connection.
+        let hasResidual = 0;
+        let residualBufName = null;
+        const currentOut = activation > 0 && g[i] ? g[i].outputs[0] : out;
+        if (i + 1 < g.length && g[i + 1].op === 'Add') {
+          const addNode = g[i + 1];
+          const addInA = addNode.inputs[0], addInB = addNode.inputs[1];
+          if (addInA === currentOut && tensors[addInB]) {
+            hasResidual = 1;
+            residualBufName = addInB;
+          } else if (addInB === currentOut && tensors[addInA]) {
+            hasResidual = 1;
+            residualBufName = addInA;
+          }
+          if (hasResidual) {
+            shapes[addNode.outputs[0]] = outShape;
+            i++; // skip the Add node
+          }
+        }
 
         const outBuf = getOrAlloc(out, outShape);
         // If we skipped an activation, make sure that output name also points here
-        if (activation > 0 && g[i]) tensors[g[i].outputs[0]] = outBuf;
+        if (activation > 0 && g[i - (hasResidual ? 1 : 0)]) tensors[g[i - (hasResidual ? 1 : 0)].outputs[0]] = outBuf;
+        // If we fused Add, point its output to the same buffer
+        if (hasResidual) tensors[g[i].outputs[0]] = outBuf;
+
+        const residualBuf = hasResidual ? tensors[residualBufName] : this.dummy;
+
+        const isDW = group === iC && group > 1;
+        const is1x1 = kH === 1 && kW === 1;
+        const ocTile = is1x1 && iC <= 64 ? 4 : 1;
 
         const params = new Uint32Array([
           1, iC, iH, iW, oC, oH, oW, kH, kW,
           stride[0], stride[1], pads[0], pads[1], group,
-          activation, 0, // has_residual = 0 (handled by separate Add)
+          activation, hasResidual, ocTile,
         ]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
@@ -356,7 +383,11 @@ export class ModelRunner {
         if (!tensors[inName]) throw new Error(`Conv node ${i}: missing input buffer '${inName}'`);
         if (!this.W[wName]) throw new Error(`Conv node ${i}: missing weight '${wName}'`);
 
-        const zDim = oC;
+        const zDim = is1x1 ? Math.ceil(oC / ocTile) : oC;
+        _dispatchLabel = isDW ? `conv_dw_${kH}x${kW}_${oC}ch_${oH}x${oW}` :
+                         is1x1 ? `conv_1x1_${iC}to${oC}_${oH}x${oW}` :
+                         `conv_${kH}x${kW}_${iC}to${oC}_${oH}x${oW}`;
+        if (hasResidual) _dispatchLabel += '+add';
 
         dispatch(enc, this.P.conv2d, device.createBindGroup({
           layout: this.P.conv2d.getBindGroupLayout(0),
@@ -366,7 +397,7 @@ export class ModelRunner {
             { binding: 2, resource: { buffer: this.W[wName] } },
             { binding: 3, resource: { buffer: bName ? this.W[bName] : this.dummy } },
             { binding: 4, resource: { buffer: preluName ? this.W[preluName] : this.dummy } },
-            { binding: 5, resource: { buffer: this.dummy } }, // no residual
+            { binding: 5, resource: { buffer: residualBuf } },
             { binding: 6, resource: { buffer: outBuf } },
           ],
         }), Math.ceil(oW / 8), Math.ceil(oH / 8), zDim);
@@ -384,6 +415,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 0]); // mode 0 = plain add
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `add_${floats}`;
         dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
@@ -415,6 +447,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 1]); // mode 1 = relu
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `relu_${floats}`;
         dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
@@ -445,6 +478,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 3, C, spatial]); // mode 3 = prelu
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `prelu_${C}ch_${floats}`;
         dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
@@ -468,6 +502,7 @@ export class ModelRunner {
         const params = new Uint32Array([floats, 4, 0, 0]); // mode 4 = sigmoid
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `sigmoid_${floats}`;
         dispatch(enc, this.P.add, device.createBindGroup({
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
@@ -493,6 +528,7 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW, oH, oW, ch]); // no channel padding
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `maxpool_${ch}ch_${oH}x${oW}`;
         dispatch(enc, this.P.maxpool, device.createBindGroup({
           layout: this.P.maxpool.getBindGroupLayout(0),
           entries: [
@@ -513,6 +549,7 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `global_avg_pool_${ch}ch`;
         dispatch(enc, this.P.global_avg_pool, device.createBindGroup({
           layout: this.P.global_avg_pool.getBindGroupLayout(0),
           entries: [
@@ -553,6 +590,7 @@ export class ModelRunner {
         const params = new Uint32Array([1, K, N, bName ? 1 : 0, hasSigmoid]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `gemm_${K}x${N}`;
         dispatch(enc, this.P.gemm, device.createBindGroup({
           layout: this.P.gemm.getBindGroupLayout(0),
           entries: [
@@ -582,6 +620,7 @@ export class ModelRunner {
         const params = new Uint32Array([inShape[1], outShape[1], inShape[2], inShape[3]]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `pad_channels_${inShape[1]}to${outShape[1]}`;
         dispatch(enc, this.P.pad_channels, device.createBindGroup({
           layout: this.P.pad_channels.getBindGroupLayout(0),
           entries: [
@@ -651,6 +690,7 @@ export class ModelRunner {
             const tParams = new Uint32Array([C, H, Wd, 0]);
             const tpb = this._getUniformBuf(tParams.byteLength);
             device.queue.writeBuffer(tpb, 0, tParams);
+            _dispatchLabel = `transpose_nhwc_${C}x${H}x${Wd}`;
             dispatch(enc, this.P.transpose_nhwc, device.createBindGroup({
               layout: this.P.transpose_nhwc.getBindGroupLayout(0),
               entries: [
@@ -688,6 +728,7 @@ export class ModelRunner {
         const params = new Uint32Array([ch, iH, iW, iH * 2, iW * 2]);
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `resize_2x_${ch}ch_${iH}x${iW}`;
         dispatch(enc, this.P.resize, device.createBindGroup({
           layout: this.P.resize.getBindGroupLayout(0),
           entries: [
@@ -823,6 +864,156 @@ export class ModelRunner {
     for (const info of this._readbackInfos) {
       enc.copyBufferToBuffer(info.src, 0, info.staging, 0, info.bytes);
     }
+  }
+
+  /**
+   * Profile compiled model with GPU timestamp queries.
+   * Returns per-dispatch timing in nanoseconds. Requires 'timestamp-query' feature.
+   * Call once after compile() for a detailed breakdown of where time goes.
+   */
+  async profileCompiled(iterations = 20) {
+    const device = this.device;
+    const dispatches = this._steps.filter(s => s.type === 'dispatch');
+    const numDispatches = dispatches.length;
+    const numTimestamps = numDispatches * 2; // before + after each dispatch
+
+    if (!device.features.has('timestamp-query')) {
+      console.warn('timestamp-query not available, falling back to serial CPU timing');
+      return this._profileCPUFallback(iterations);
+    }
+
+    const querySet = device.createQuerySet({ type: 'timestamp', count: numTimestamps });
+    const resolveBuf = device.createBuffer({
+      size: numTimestamps * 8,
+      usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+    });
+    const readBuf = device.createBuffer({
+      size: numTimestamps * 8,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+
+    // Warmup
+    for (let w = 0; w < 5; w++) {
+      const enc = device.createCommandEncoder();
+      this.encodeInto(enc);
+      device.queue.submit([enc.finish()]);
+    }
+    await device.queue.onSubmittedWorkDone();
+
+    const allTimings = [];
+    for (let iter = 0; iter < iterations; iter++) {
+      const enc = device.createCommandEncoder();
+      let tsIdx = 0;
+
+      for (const s of this._steps) {
+        if (s.type === 'dispatch') {
+          const pass = enc.beginComputePass({
+            timestampWrites: {
+              querySet,
+              beginningOfPassWriteIndex: tsIdx,
+              endOfPassWriteIndex: tsIdx + 1,
+            },
+          });
+          pass.setPipeline(s.pipeline);
+          pass.setBindGroup(0, s.bindGroup);
+          pass.dispatchWorkgroups(s.x, s.y, s.z);
+          pass.end();
+          tsIdx += 2;
+        } else if (s.type === 'copy') {
+          enc.copyBufferToBuffer(s.src, s.srcOff, s.dst, s.dstOff, s.bytes);
+        }
+      }
+
+      for (const info of this._readbackInfos) {
+        enc.copyBufferToBuffer(info.src, 0, info.staging, 0, info.bytes);
+      }
+
+      enc.resolveQuerySet(querySet, 0, numTimestamps, resolveBuf, 0);
+      enc.copyBufferToBuffer(resolveBuf, 0, readBuf, 0, numTimestamps * 8);
+      device.queue.submit([enc.finish()]);
+      await device.queue.onSubmittedWorkDone();
+
+      await readBuf.mapAsync(GPUMapMode.READ);
+      const ts = new BigInt64Array(readBuf.getMappedRange().slice(0));
+      readBuf.unmap();
+
+      const iterTimings = [];
+      for (let d = 0; d < numDispatches; d++) {
+        iterTimings.push(Number(ts[d * 2 + 1] - ts[d * 2]));
+      }
+      allTimings.push(iterTimings);
+    }
+
+    querySet.destroy();
+    resolveBuf.destroy();
+    readBuf.destroy();
+
+    return this._formatProfile(dispatches, allTimings);
+  }
+
+  async _profileCPUFallback(iterations) {
+    const device = this.device;
+    const dispatches = this._steps.filter(s => s.type === 'dispatch');
+
+    // Warmup
+    for (let w = 0; w < 5; w++) {
+      const enc = device.createCommandEncoder();
+      this.encodeInto(enc);
+      device.queue.submit([enc.finish()]);
+    }
+    await device.queue.onSubmittedWorkDone();
+
+    const allTimings = [];
+    for (let iter = 0; iter < iterations; iter++) {
+      const iterTimings = [];
+      for (const s of this._steps) {
+        if (s.type !== 'dispatch') continue;
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(s.pipeline);
+        pass.setBindGroup(0, s.bindGroup);
+        pass.dispatchWorkgroups(s.x, s.y, s.z);
+        pass.end();
+        const t0 = performance.now();
+        device.queue.submit([enc.finish()]);
+        await device.queue.onSubmittedWorkDone();
+        iterTimings.push((performance.now() - t0) * 1e6); // convert ms to ns
+      }
+      allTimings.push(iterTimings);
+    }
+
+    return this._formatProfile(dispatches, allTimings);
+  }
+
+  _formatProfile(dispatches, allTimings) {
+    const numDispatches = dispatches.length;
+    const results = [];
+    for (let d = 0; d < numDispatches; d++) {
+      const times = allTimings.map(t => t[d]).sort((a, b) => a - b);
+      const median = times[Math.floor(times.length / 2)];
+      const label = dispatches[d].label || `dispatch_${d}`;
+      const dims = `${dispatches[d].x}x${dispatches[d].y}x${dispatches[d].z}`;
+      results.push({ idx: d, label, dims, medianNs: median, medianUs: median / 1000 });
+    }
+    results.sort((a, b) => b.medianNs - a.medianNs);
+
+    const totalNs = results.reduce((s, r) => s + r.medianNs, 0);
+    const totalMs = totalNs / 1e6;
+
+    // Aggregate by category -- preserve conv subtypes (conv_dw, conv_1x1, conv_general)
+    const cats = {};
+    for (const r of results) {
+      let cat;
+      if (r.label.startsWith('conv_dw')) cat = 'conv_dw';
+      else if (r.label.startsWith('conv_1x1')) cat = 'conv_1x1';
+      else if (r.label.startsWith('conv_')) cat = 'conv_general';
+      else cat = r.label.replace(/_\d+.*/, '').replace(/_(ch|to).*/, '');
+      if (!cats[cat]) cats[cat] = { count: 0, totalNs: 0 };
+      cats[cat].count++;
+      cats[cat].totalNs += r.medianNs;
+    }
+
+    return { dispatches: results, categories: cats, totalMs, totalNs };
   }
 
   /** Read outputs from staging buffers (call after submit + GPU completion). */
