@@ -299,8 +299,8 @@ export class HandTracker {
           let closeThreshSq = 40 * 40;
           for (const s of this.slots) {
             if (!s.active || !s.rect) continue;
-            const half = s.rect.w * 0.5;
-            if (half * half > closeThreshSq) closeThreshSq = half * half;
+            const roiW = s.rect.w;
+            if (roiW * roiW > closeThreshSq) closeThreshSq = roiW * roiW;
           }
           if (n.minDistSqToActive < closeThreshSq) continue;
 
@@ -314,6 +314,7 @@ export class HandTracker {
           }
 
           const rect = detectionToRect(n.det, vw, vh);
+          if (rect.cx < 0 || rect.cx > vw || rect.cy < 0 || rect.cy > vh) continue;
           bestSlot.active = true;
           bestSlot.rect = rect;
           bestSlot.centroid = { x: rect.cx, y: rect.cy };
