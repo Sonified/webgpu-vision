@@ -10,7 +10,7 @@ import { workerUrlWithGates, registerWorkerForGateUpdates, log, makeLogger } fro
 // quick swipes) dipped the flag below for a frame and killed the slot.
 // 0.3 keeps tracking through transient drops; palm detection still gates
 // the initial detection so false positives are rare.
-const HAND_FLAG_THRESHOLD = 0.3;
+let HAND_FLAG_THRESHOLD = 0.3;
 
 const logPalm = makeLogger('tracking', 2000);
 const logSlot = makeLogger('tracking', 2000);
@@ -186,6 +186,7 @@ export class HandTracker {
     // duplicates (both tracking the same physical hand). Smaller = only
     // near-exact centroid overlap triggers dedup; larger = more aggressive.
     this.dupDistPx = 25;
+    this.handFlagThreshold = HAND_FLAG_THRESHOLD;
   }
 
   async init(onStatus) {
@@ -295,8 +296,13 @@ export class HandTracker {
           }
           if (nearAssigned) continue;
 
-          const VERY_CLOSE_PX = 40;
-          if (n.minDistSqToActive < VERY_CLOSE_PX * VERY_CLOSE_PX) continue;
+          let closeThreshSq = 40 * 40;
+          for (const s of this.slots) {
+            if (!s.active || !s.rect) continue;
+            const half = s.rect.w * 0.5;
+            if (half * half > closeThreshSq) closeThreshSq = half * half;
+          }
+          if (n.minDistSqToActive < closeThreshSq) continue;
 
           let bestSlot = emptySlots[0];
           let bestDist = Infinity;
@@ -357,7 +363,7 @@ export class HandTracker {
       const strong = [];
       for (const r of rawResults) {
         if (!r.result) continue;
-        if (r.result.handFlag <= HAND_FLAG_THRESHOLD) continue;
+        if (r.result.handFlag <= this.handFlagThreshold) continue;
         strong.push({
           slotIdx: r.slotIdx,
           handFlag: r.result.handFlag,
@@ -430,6 +436,7 @@ export class HandTracker {
           slot.landmarks = a.landmarks;
           slot.centroid = a.centroid;
           slot.lastHandedness = a.handedness;
+          slot.lastHandFlag = a.handFlag;
           slot.rect = this.landmarksToRect(a.landmarks, vw, vh);
         } else {
           // No strong inference assigned to this slot this frame. Grace
@@ -455,7 +462,7 @@ export class HandTracker {
       // same physical hand across frames. Null = that slot is empty.
       const hands = this.slots.map(s => {
         if (!s.landmarks) return null;
-        return { landmarks: s.landmarks, handedness: s.lastHandedness };
+        return { landmarks: s.landmarks, handedness: s.lastHandedness, handFlag: s.lastHandFlag || 0 };
       });
 
       logLandmark(`[tracking] slots: ${this.slots.map(s => s.active ? String(s.index) : '_').join(',')}`);

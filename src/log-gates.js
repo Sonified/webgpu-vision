@@ -11,7 +11,7 @@
 // all-on default; applyLogGatesFromUrl() overwrites it from ?gates=.
 let currentGates = (typeof window !== 'undefined' && window.__wgvLogGates && window.__wgvLogGates.state)
   ? window.__wgvLogGates.state
-  : { lifecycle: true, performance: true, tracking: true };
+  : { lifecycle: true, bench: true, fps: true, heartbeat: true, tracking: true };
 
 /** Gated log. If the category is disabled, nothing runs -- callers should
  *  inline their template literals into the args so message construction is

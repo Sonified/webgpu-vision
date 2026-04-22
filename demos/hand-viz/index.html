@@ -99,7 +99,8 @@
 <div id="hud">
   <span class="label">FPS:</span> <span class="val" id="fps">--</span><br>
   <span class="label">Hands:</span> <span class="val" id="hand-count">0</span><br>
-  <span class="label">Backend:</span> <span class="val" id="backend-label">--</span>
+  <span class="label">Backend:</span> <span class="val" id="backend-label">--</span><br>
+  <span class="label">Z:</span> <span class="val" id="hand-z" style="font-size:0.85rem;">--</span>
 </div>
 
 <script type="importmap">
@@ -1093,6 +1094,16 @@ function animate() {
 
   const handCount = (latestHands[0] ? 1 : 0) + (latestHands[1] ? 1 : 0);
   document.getElementById('hand-count').textContent = handCount;
+
+  const zParts = [];
+  const hands = [interp0, interp1];
+  for (let h = 0; h < 2; h++) {
+    if (!hands[h]) continue;
+    const wZ = hands[h][0].z.toFixed(3);
+    const tips = FINGERTIPS.map(i => hands[h][i].z.toFixed(3));
+    zParts.push(`H${h}: w=${wZ} t=[${tips.join(', ')}]`);
+  }
+  document.getElementById('hand-z').textContent = zParts.length ? zParts.join(' | ') : '--';
 
   frameCount++;
   if (now - lastFpsTime > 500) {

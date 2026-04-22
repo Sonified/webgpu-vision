@@ -246,7 +246,9 @@
   // Keep in sync with src/log-gates.js
   const CATS = [
     { id: 'lifecycle', label: 'Lifecycle' },
-    { id: 'performance', label: 'Performance' },
+    { id: 'bench', label: 'Bench' },
+    { id: 'fps', label: 'Frame Rate' },
+    { id: 'heartbeat', label: 'Heartbeat' },
     { id: 'tracking', label: 'Tracking' },
   ];
 
@@ -315,7 +317,9 @@
   <div class="section-label">Hands</div>
   <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="hand-floor-val">0.100</span></div>
   <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="5" value="200"><span class="param-val" id="hand-beta-val">20.0</span></div>
-  <div class="param-row" style="margin-top:6px;"><span class="param-name">OpenThresh</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">PinchThresh</span><input type="range" id="pinch-thresh" min="0.01" max="0.10" step="0.005" value="0.05"><span class="param-val" id="pinch-thresh-val">0.050</span></div>
+  <div class="param-row"><span class="param-name">HandConf</span><input type="range" id="hand-conf-thresh" min="0" max="1" step="0.05" value="0.30"><span class="param-val" id="hand-conf-thresh-val">0.30</span></div>
+  <div class="param-row"><span class="param-name">OpenFrames</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
   <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
@@ -352,6 +356,8 @@
 <div id="hud" style="display:none;">
   <div><span class="label">Head: </span><span id="head-pos" class="val">--</span></div>
   <div><span class="label">Hand: </span><span id="hand-state" class="val">--</span></div>
+  <div><span class="label">Hand Z: </span><span id="hand-z" class="val">--</span></div>
+  <div><span class="label">Conf: </span><span id="hand-conf" class="val">--</span></div>
   <div><span class="label">Gesture: </span><span id="gesture-state" class="val">--</span></div>
   <div><span class="label">FPS: </span><span id="fps" class="val">--</span></div>
   <div><span class="label">Backend: </span><span id="backend-label" class="val">--</span></div>
@@ -787,8 +793,16 @@ const handFilters = Array.from({ length: 2 }, () =>
   )
 );
 
+const handZFilters = [
+  new OneEuroFilter(60, filterParams.hand.floor, filterParams.hand.beta, 1.0),
+  new OneEuroFilter(60, filterParams.hand.floor, filterParams.hand.beta, 1.0),
+];
+const refPalmSize = [0, 0];
+const handZPos = [0, 0];
+const handConf = [0, 0];
+
 function updateFilterParams(group, param, value) {
-  const flatFilters = group === 'head' ? headFilters : handFilters.flat().flatMap(j => j);
+  const flatFilters = group === 'head' ? headFilters : handFilters.flat().flatMap(j => j).concat(handZFilters);
   for (const f of flatFilters) {
     if (param === 'floor') f.minCutoff = value;
     else if (param === 'beta') f.beta = value;
@@ -1077,7 +1091,7 @@ const handStates = [
   { pinching: false, wasPinching: false, heldBall: null, openCount: 0, lastSeen: 0 },
   { pinching: false, wasPinching: false, heldBall: null, openCount: 0, lastSeen: 0 },
 ];
-const pinchThreshold = 0.05;
+let pinchThreshold = parseFloat(getSetting('pinchThresh') || '0.05') || 0.05;
 // Pinch-release hysteresis: require this many consecutive "open" frames
 // (thumb-index distance >= threshold) before flipping pinching false. 1 =
 // instant release (current behavior), higher = more stability against the
@@ -1312,6 +1326,7 @@ function handleHandResult(hands, opts = {}) {
       handMotion[h].currentMode = 1;
       // Reset filters so they don't stale-lerp when hand reappears
       for (const joint of handFilters[h]) for (const f of joint) f.reset();
+      handZFilters[h].reset(); refPalmSize[h] = 0; handZPos[h] = 0; handConf[h] = 0;
       continue;
     }
     const hand = entry.landmarks;
@@ -1322,6 +1337,18 @@ function handleHandResult(hands, opts = {}) {
       z: handFilters[h][j][2].filter(lm.z, now),
     }));
     currentHands[h] = filtered;
+
+    // Hand Z from 3D palm bone length (rotation-invariant).
+    // xyz distance means foreshortening in x/y is recovered from z.
+    const px = filtered[0].x - filtered[9].x;
+    const py = filtered[0].y - filtered[9].y;
+    const pz = filtered[0].z - filtered[9].z;
+    const palmSize = Math.hypot(px, py, pz);
+    if (refPalmSize[h] === 0) refPalmSize[h] = palmSize;
+    const rawHandZ = -((palmSize / refPalmSize[h]) - 1);
+    handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+    handConf[h] = entry.handFlag || 0;
+
     // Hand motion state for adaptive interp: track wrist (landmark 0) as the
     // hand's representative position. Hand landmarks are in [0,1] coords;
     // head position is in [-1,1] after a *2 scaling, so hand speed has half
@@ -1444,8 +1471,10 @@ function handleGestureInput() {
         };
       }
       const pos = landmarkToScene(holdPoint);
-      pos.y += 0.5;  // up
-      pos.z -= 1.0;  // forward (toward cubes)
+      if (gestureMode === 'grab') {
+        pos.y += 0.5;
+        pos.z -= 1.0;
+      }
 
       if (!hs.heldBall) {
         const geo = new THREE.SphereGeometry(0.1, 8, 8);
@@ -1631,6 +1660,8 @@ async function initWebGPUBackend(silent = false) {
       // the hamburger-drawer slider). Defaults to 25px on first load.
       const savedDup = parseInt(localStorage.getItem('wgv_dup_dist'));
       if (Number.isFinite(savedDup) && savedDup > 0) gpuHandTracker.dupDistPx = savedDup;
+      const savedConf = parseFloat(getSetting('handConfThresh'));
+      if (Number.isFinite(savedConf)) gpuHandTracker.handFlagThreshold = savedConf;
       setStatus('Loading WebGPU hand tracker...');
       await gpuHandTracker.init(setStatus);
       setStatus('Loading WebGPU face tracker...');
@@ -1665,7 +1696,7 @@ const _bench = {
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
-      log('performance', `[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      log('bench', `[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);
@@ -1673,7 +1704,7 @@ const _bench = {
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
       const faceTag = faceMode === 'landmark' ? 'LAN' : 'DET';
-      log('performance', `[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      log('bench', `[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     this.handLatencies = [];
     this.faceLatencies = [];
@@ -1744,7 +1775,7 @@ function _p1MaybeReport(now) {
   const hps  = _p1HandCalls / dt;
   const fr   = vfps > 0 ? (fps / vfps).toFixed(2) : '?';
   const hr   = vfps > 0 ? (hps / vfps).toFixed(2) : '?';
-  log('performance', `[FRAME RATE] video: ${vfps.toFixed(1)} fps | face: ${fps.toFixed(1)} calls/s (${fr}x oversampling) | hand: ${hps.toFixed(1)} calls/s (${hr}x oversampling)`);
+  log('fps', `[FRAME RATE] video: ${vfps.toFixed(1)} fps | face: ${fps.toFixed(1)} calls/s (${fr}x oversampling) | hand: ${hps.toFixed(1)} calls/s (${hr}x oversampling)`);
   _p1LastReport = now;
   _p1VideoFrames = 0;
   _p1FaceCalls = 0;
@@ -1785,7 +1816,7 @@ faceModeSelect.value = faceMode;
 faceModeSelect.addEventListener('change', (e) => {
   faceMode = e.target.value;
   setSetting('faceMode', faceMode);
-  log('performance', '[BENCH] Face mode switched to:', faceMode);
+  log('bench', '[BENCH] Face mode switched to:', faceMode);
   // MediaPipe worker holds both tasks; tell it which one to run from now on.
   // WebGPU path reads faceMode directly each frame in processWebGPUFace().
   if (activeBackend === 'mediapipe' && faceWorker) {
@@ -2044,6 +2075,20 @@ function animate(timestamp) {
   lastAnimateTimestamp = timestamp;
   if (document.hidden) { console.warn('[lifecycle] animate() bailed: document.hidden'); return; }
   requestAnimationFrame(animate);
+  // COI service worker reloads the page without user activation, so Chrome
+  // can throttle rAF to 1fps. Detect this and pump via setTimeout until
+  // rAF un-throttles. The dedup above prevents double-rendering.
+  if (animate._prevTs && timestamp - animate._prevTs > 500) {
+    if (!animate._boosting) {
+      animate._boosting = true;
+      log('lifecycle', '[lifecycle] rAF throttled -- boosting via setTimeout');
+    }
+    setTimeout(() => requestAnimationFrame(animate), 16);
+  } else if (animate._boosting) {
+    animate._boosting = false;
+    log('lifecycle', '[lifecycle] rAF un-throttled -- boost off');
+  }
+  animate._prevTs = timestamp;
   try {
   const dt = clock.getDelta();
   const now = performance.now();
@@ -2144,7 +2189,7 @@ function animate(timestamp) {
     animate._lastHeartbeat = now;
     const hd = now - headLastSeen <= 500;
     const nh = currentHands.filter(h => h).length;
-    log('performance', `[heartbeat] animate alive | head=${hd ? 'YES' : 'NO'} (lastSeen=${Math.round(now - headLastSeen)}ms ago) hands=${nh} camX=${camera.position.x.toFixed(2)} fps=${document.getElementById('fps').textContent}`);
+    log('heartbeat', `[heartbeat] animate alive | head=${hd ? 'YES' : 'NO'} (lastSeen=${Math.round(now - headLastSeen)}ms ago) hands=${nh} camX=${camera.position.x.toFixed(2)} fps=${document.getElementById('fps').textContent}`);
   }
 
   // HUD -- throttle to 10fps and use last-seen timeouts to smooth async ML gaps
@@ -2177,6 +2222,18 @@ function animate(timestamp) {
       handEl.textContent = 'No hand';
       lastHandCount = 0;
     }
+    const handZParts = [];
+    for (let h = 0; h < 2; h++) {
+      if (!currentHands[h]) continue;
+      handZParts.push(`H${h}: ${handZPos[h].toFixed(3)}`);
+    }
+    document.getElementById('hand-z').textContent = handZParts.length ? handZParts.join(' | ') : '--';
+    const confParts = [];
+    for (let h = 0; h < 2; h++) {
+      if (!currentHands[h]) continue;
+      confParts.push(`H${h}: ${handConf[h].toFixed(2)}`);
+    }
+    document.getElementById('hand-conf').textContent = confParts.length ? confParts.join(' | ') : '--';
     const gestureEl = document.getElementById('gesture-state');
     const gestures = handStates.filter((hs, i) => currentHands[i]).map(hs => hs.pinching ? 'PINCH' : 'OPEN');
     gestureEl.textContent = gestures.join(' / ') || '--';
@@ -2482,7 +2539,31 @@ async function loadCameraAndModels() {
   }
 }
 
-// OpenThresh dropdown: pinch-release hysteresis. Persisted to localStorage.
+{
+  const pinchSlider = document.getElementById('pinch-thresh');
+  const pinchVal = document.getElementById('pinch-thresh-val');
+  pinchSlider.value = pinchThreshold;
+  pinchVal.textContent = pinchThreshold.toFixed(3);
+  pinchSlider.addEventListener('input', (e) => {
+    pinchThreshold = parseFloat(e.target.value);
+    pinchVal.textContent = pinchThreshold.toFixed(3);
+    setSetting('pinchThresh', String(pinchThreshold));
+  });
+}
+{
+  const confSlider = document.getElementById('hand-conf-thresh');
+  const confVal = document.getElementById('hand-conf-thresh-val');
+  const savedConf = parseFloat(getSetting('handConfThresh'));
+  if (Number.isFinite(savedConf)) confSlider.value = savedConf;
+  confVal.textContent = parseFloat(confSlider.value).toFixed(2);
+  if (gpuHandTracker) gpuHandTracker.handFlagThreshold = parseFloat(confSlider.value);
+  confSlider.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    confVal.textContent = v.toFixed(2);
+    setSetting('handConfThresh', String(v));
+    if (gpuHandTracker) gpuHandTracker.handFlagThreshold = v;
+  });
+}
 {
   const openThreshSelect = document.getElementById('open-thresh');
   openThreshSelect.value = String(openThresh);
