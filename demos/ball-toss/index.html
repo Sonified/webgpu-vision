@@ -640,6 +640,21 @@ for (let h = 0; h < 2; h++) {
   handSkeletons.push({ group, joints, bones });
 }
 
+// Hand orientation axes: RGB arrows showing the palm coordinate frame
+// derived from the triangle wrist(0) → index_MCP(5) → pinky_MCP(17).
+const handOrientAxes = [];
+for (let h = 0; h < 2; h++) {
+  const group = new THREE.Group();
+  group.visible = false;
+  const len = 1.5;
+  const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(), len, 0xff4444, 0.3, 0.15);
+  const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(), len, 0x44ff44, 0.3, 0.15);
+  const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(), len, 0x4488ff, 0.3, 0.15);
+  group.add(xArrow, yArrow, zArrow);
+  scene.add(group);
+  handOrientAxes.push({ group, xArrow, yArrow, zArrow });
+}
+
 function landmarkToScene(lm) {
   const handZ = camera.position.z - (6 + headPos.z * -4) + lm.z * -3;
   // In head-coupled parallax, Z=0 is the "screen plane" — objects there stay
@@ -1338,15 +1353,54 @@ function handleHandResult(hands, opts = {}) {
     }));
     currentHands[h] = filtered;
 
-    // Hand Z from 3D palm bone length (rotation-invariant).
-    // xyz distance means foreshortening in x/y is recovered from z.
-    const px = filtered[0].x - filtered[9].x;
-    const py = filtered[0].y - filtered[9].y;
-    const pz = filtered[0].z - filtered[9].z;
-    const palmSize = Math.hypot(px, py, pz);
+    // Palm orientation from triangle: wrist(0), index_MCP(5), pinky_MCP(17).
+    // Two edges + cross product → full 3D orientation frame.
+    const HAND_Z_SCALE = 3.7;
+    const w  = filtered[0], im = filtered[5], pm = filtered[17];
+    // Edge vectors in normalized landmark space (z scaled to match x/y units)
+    const e1 = { x: im.x - w.x, y: im.y - w.y, z: (im.z - w.z) * HAND_Z_SCALE }; // wrist→index
+    const e2 = { x: pm.x - w.x, y: pm.y - w.y, z: (pm.z - w.z) * HAND_Z_SCALE }; // wrist→pinky
+    // Cross product → palm normal
+    const nx = e1.y * e2.z - e1.z * e2.y;
+    const ny = e1.z * e2.x - e1.x * e2.z;
+    const nz = e1.x * e2.y - e1.y * e2.x;
+    const nLen = Math.hypot(nx, ny, nz) || 1;
+    const palmNormal = { x: nx / nLen, y: ny / nLen, z: nz / nLen };
+    // Palm "across" vector (index→pinky direction)
+    const ax = im.x - pm.x, ay = im.y - pm.y, az = (im.z - pm.z) * HAND_Z_SCALE;
+    const aLen = Math.hypot(ax, ay, az) || 1;
+    const palmAcross = { x: ax / aLen, y: ay / aLen, z: az / aLen };
+    // Palm "up" = normal × across (orthogonalized)
+    const ux = palmNormal.y * palmAcross.z - palmNormal.z * palmAcross.y;
+    const uy = palmNormal.z * palmAcross.x - palmNormal.x * palmAcross.z;
+    const uz = palmNormal.x * palmAcross.y - palmNormal.y * palmAcross.x;
+    const uLen = Math.hypot(ux, uy, uz) || 1;
+
+    // Palm size: use "across" (index MCP → pinky MCP) 3D distance.
+    // When palm faces camera this is the full width; when knife-edge it
+    // collapses in 2D but the z component compensates.
+    const palmSize3D = Math.hypot(ax, ay, az);
+    // Also compute wrist→mid_MCP height
+    const hx = (e1.x + e2.x) * 0.5, hy = (e1.y + e2.y) * 0.5, hz = (e1.z + e2.z) * 0.5;
+    const palmHeight3D = Math.hypot(hx, hy, hz);
+    // Use the geometric mean of width and height -- both are rotation-invariant
+    // individually, and the mean is even more stable.
+    const palmSize = Math.sqrt(palmSize3D * palmHeight3D);
     if (refPalmSize[h] === 0) refPalmSize[h] = palmSize;
     const rawHandZ = -((palmSize / refPalmSize[h]) - 1);
     handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+
+    // Orientation angles for diagnostics
+    const pitch = Math.asin(-palmNormal.y) * 180 / Math.PI;
+    const yaw   = Math.atan2(palmNormal.x, palmNormal.z) * 180 / Math.PI;
+    if (h === 0 && (!handleHandResult._lastZLog || now - handleHandResult._lastZLog > 500)) {
+      handleHandResult._lastZLog = now;
+      log('heartbeat',
+        `[HAND-Z] w=${palmSize3D.toFixed(4)} h=${palmHeight3D.toFixed(4)} geo=${palmSize.toFixed(4)}` +
+        ` | ref=${refPalmSize[h].toFixed(4)} raw=${rawHandZ.toFixed(4)} filt=${handZPos[h].toFixed(4)}` +
+        ` | pitch=${pitch.toFixed(1)} yaw=${yaw.toFixed(1)}`
+      );
+    }
     handConf[h] = entry.handFlag || 0;
 
     // Hand motion state for adaptive interp: track wrist (landmark 0) as the
@@ -2107,6 +2161,41 @@ function animate(timestamp) {
   // handleGestureInput so the ball-position math uses fresh displayed hand
   // landmarks instead of the previous frame's.
   updateHandSkeletons();
+  for (let h = 0; h < 2; h++) {
+    const axes = handOrientAxes[h];
+    if (currentHands[h]) {
+      const lm = currentHands[h];
+      const p0  = landmarkToScene(lm[0]);   // wrist
+      const p5  = landmarkToScene(lm[5]);   // index MCP
+      const p17 = landmarkToScene(lm[17]);  // pinky MCP
+
+      // Palm center
+      const center = new THREE.Vector3(
+        (p0.x + p5.x + p17.x) / 3,
+        (p0.y + p5.y + p17.y) / 3,
+        (p0.z + p5.z + p17.z) / 3,
+      );
+
+      // The 2D hand projection is a Necker cube: the model tracks "palm
+      // toward camera" but the eye sees "back of hand reaching into screen."
+      // Negate z in the edge vectors to flip to the mirror interpretation
+      // so the cross product gives the normal your eyes expect.
+      const v1 = new THREE.Vector3(p5.x - p0.x, p5.y - p0.y, -(p5.z - p0.z));
+      const v2 = new THREE.Vector3(p17.x - p0.x, p17.y - p0.y, -(p17.z - p0.z));
+      const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
+
+      const across = new THREE.Vector3(p5.x - p17.x, p5.y - p17.y, -(p5.z - p17.z)).normalize();
+      const up = new THREE.Vector3().crossVectors(normal, across).normalize();
+
+      axes.group.position.copy(center);
+      axes.xArrow.setDirection(across);
+      axes.yArrow.setDirection(up);
+      axes.zArrow.setDirection(normal);
+      axes.group.visible = true;
+    } else {
+      axes.group.visible = false;
+    }
+  }
   handleGestureInput();
 
   // Rotate cubes + update instanced mesh
