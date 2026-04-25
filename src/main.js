@@ -142,6 +142,7 @@ async function setupCamera() {
 
 function drawHands(hands) {
   for (const hand of hands) {
+    if (!hand) continue;
     const lm = hand.landmarks;
     if (!lm || lm.length === 0) continue;
 

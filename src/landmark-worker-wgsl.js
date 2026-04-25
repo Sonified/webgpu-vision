@@ -246,12 +246,25 @@ self.onmessage = async (e) => {
         }
       }
 
+      // World landmarks: raw 3D coordinates in meters, no projection needed
+      const rawWorld = outputNames.worldLandmarks ? outputs[outputNames.worldLandmarks] : null;
+      let worldLandmarksBuf = null;
+      if (rawWorld && rawWorld.length === 63) {
+        const wl = new Float32Array(rawWorld);
+        worldLandmarksBuf = wl.buffer;
+      }
+
+      const transferList = [];
+      if (projectedLandmarks) transferList.push(projectedLandmarks.buffer);
+      if (worldLandmarksBuf) transferList.push(worldLandmarksBuf);
+
       self.postMessage({
         type: 'result',
         handFlag,
         handedness,
         landmarks: projectedLandmarks ? projectedLandmarks.buffer : null,
-      }, projectedLandmarks ? [projectedLandmarks.buffer] : []);
+        worldLandmarks: worldLandmarksBuf,
+      }, transferList);
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });
     }

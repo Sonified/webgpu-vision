@@ -100,8 +100,8 @@ async function initGPU(device) {
 }
 
 async function gpuLetterbox(bitmap) {
-  const srcW = bitmap.width;
-  const srcH = bitmap.height;
+  const srcW = bitmap.displayWidth || bitmap.width;
+  const srcH = bitmap.displayHeight || bitmap.height;
   const scale = PALM_SIZE / Math.max(srcW, srcH);
   const dstW = Math.round(srcW * scale);
   const dstH = Math.round(srcH * scale);
@@ -161,8 +161,8 @@ async function gpuLetterbox(bitmap) {
 
 // GPU-direct letterbox: stays on GPU, no CPU readback. Returns letterbox only.
 function gpuLetterboxDirect(bitmap) {
-  const srcW = bitmap.width;
-  const srcH = bitmap.height;
+  const srcW = bitmap.displayWidth || bitmap.width;
+  const srcH = bitmap.displayHeight || bitmap.height;
   const scale = PALM_SIZE / Math.max(srcW, srcH);
   const dstW = Math.round(srcW * scale);
   const dstH = Math.round(srcH * scale);
@@ -216,8 +216,8 @@ const palmCanvas = new OffscreenCanvas(PALM_SIZE, PALM_SIZE);
 const palmCtx = palmCanvas.getContext('2d', { willReadFrequently: true });
 
 function canvasLetterbox(bitmap) {
-  const srcW = bitmap.width;
-  const srcH = bitmap.height;
+  const srcW = bitmap.displayWidth || bitmap.width;
+  const srcH = bitmap.displayHeight || bitmap.height;
   const scale = PALM_SIZE / Math.max(srcW, srcH);
   const dstW = Math.round(srcW * scale);
   const dstH = Math.round(srcH * scale);
@@ -302,7 +302,7 @@ self.onmessage = async (e) => {
 
   if (type === 'detect') {
     try {
-      const { bitmap } = e.data;
+      const bitmap = e.data.bitmap || e.data.frame;
 
       let input, letterbox;
 

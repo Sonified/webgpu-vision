@@ -174,6 +174,14 @@
     display: none; width: 240px;
   }
   #self-view canvas { display: block; width: 100%; height: auto; }
+  #palm-preview {
+    position: fixed; bottom: 16px; right: 270px; z-index: 10;
+    border-radius: 8px; overflow: hidden;
+    border: 1px solid #666;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    display: none;
+  }
+  #palm-preview canvas { display: block; width: 192px; height: 192px; image-rendering: pixelated; }
 
   /* Hamburger + settings drawer -- slide-in from the left, modeled after
      space-weather-audio's drawer pattern. Contains the filter + interp panels
@@ -303,6 +311,13 @@
     <option value="pinch">Pinch</option>
   </select>
   <button id="reset-cubes-btn" style="margin-left:10px; background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 10px; font-size:0.9rem; cursor:pointer;">Reset Cubes</button>
+  <button id="record-world-btn" style="margin-left:10px; background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 10px; font-size:0.9rem; cursor:pointer;">Record World</button>
+  <span class="sep" style="color:#888;">Z Mode</span>
+  <select id="z-mode-select">
+    <option value="ball">Ball</option>
+    <option value="hand">Hand Translation</option>
+    <option value="off">Off</option>
+  </select>
 </div>
 
 <div id="filter-controls">
@@ -375,6 +390,7 @@
 <div id="winner" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; font-size:4rem; font-weight:700; color:#fff; font-family:system-ui,sans-serif;">You Win!</div>
 
 <div id="self-view"><canvas id="self-view-canvas" width="240" height="180"></canvas></div>
+<div id="palm-preview"><canvas id="palm-preview-canvas" width="192" height="192"></canvas></div>
 
 <video id="webcam" autoplay playsinline style="display:none;"></video>
 
@@ -586,6 +602,30 @@ document.getElementById('reset-cubes-btn').addEventListener('click', () => {
   spawnCubes();
 });
 
+// World landmark recording
+const worldRecording = [];
+let worldRecording_active = false;
+const recordBtn = document.getElementById('record-world-btn');
+recordBtn.addEventListener('click', () => {
+  if (!worldRecording_active) {
+    worldRecording.length = 0;
+    worldRecording_active = true;
+    recordBtn.textContent = 'Stop & Download';
+    recordBtn.style.color = '#ff4444';
+  } else {
+    worldRecording_active = false;
+    recordBtn.textContent = 'Record World';
+    recordBtn.style.color = '#4fc3f7';
+    const blob = new Blob([JSON.stringify(worldRecording, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `world-landmarks-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+});
+
 // Projectile pool
 const projectiles = [];
 const GRAVITY_Y = -4;
@@ -655,8 +695,25 @@ for (let h = 0; h < 2; h++) {
   handOrientAxes.push({ group, xArrow, yArrow, zArrow });
 }
 
-function landmarkToScene(lm) {
-  const handZ = camera.position.z - (6 + headPos.z * -4) + lm.z * -3;
+// Z-depth demo ball: shows palm-size Z estimation visually
+const zBallGeo = new THREE.SphereGeometry(0.4, 16, 16);
+const zBallMats = [
+  new THREE.MeshStandardMaterial({ color: 0x00ffaa, emissive: 0x00aa66, emissiveIntensity: 1.5 }),
+  new THREE.MeshStandardMaterial({ color: 0xff66aa, emissive: 0xaa3366, emissiveIntensity: 1.5 }),
+];
+const zBalls = zBallMats.map(mat => {
+  const m = new THREE.Mesh(zBallGeo, mat);
+  m.visible = false;
+  scene.add(m);
+  return m;
+});
+
+let zMode = 'ball';
+document.getElementById('z-mode-select').addEventListener('change', (e) => { zMode = e.target.value; });
+
+function landmarkToScene(lm, palmZ) {
+  const zOffset = (palmZ !== undefined) ? palmZ * 6 : lm.z * -3;
+  const handZ = camera.position.z - (6 + headPos.z * -4) + zOffset;
   // In head-coupled parallax, Z=0 is the "screen plane" — objects there stay
   // fixed on screen when the camera moves. Objects at other depths shift.
   // The hand is at handZ (between camera and screen plane), so it needs a
@@ -671,6 +728,7 @@ function landmarkToScene(lm) {
 }
 
 let currentHands = [null, null];
+let currentWorldHands = [null, null];
 // Per-hand interpolation state -- parallel to head's. displayedHands lerps
 // toward currentHands at the chosen mode's frame rate. Game logic (pinch
 // detection, projectile spawning) reads currentHands directly so it stays
@@ -711,8 +769,9 @@ function updateHandSkeletons() {
       }
     }
     const positions = [];
+    const pz = zMode === 'hand' ? handZPos[h] : undefined;
     for (let i = 0; i < JOINT_COUNT; i++) {
-      const p = landmarkToScene(displayed[i]);
+      const p = landmarkToScene(displayed[i], pz);
       positions.push(p);
       sk.joints[i].position.copy(p);
       sk.joints[i].visible = true;
@@ -1033,6 +1092,16 @@ const svCanvas = document.getElementById('self-view-canvas');
 const svCtx = svCanvas.getContext('2d');
 const selfViewBtn = document.getElementById('self-view-btn');
 
+const palmPreviewEl = document.getElementById('palm-preview');
+const palmPreviewCanvas = document.getElementById('palm-preview-canvas');
+const palmPreviewCtx = palmPreviewCanvas.getContext('2d');
+function drawPalmPreview(rgbaBuffer) {
+  palmPreviewEl.style.display = 'block';
+  const rgba = new Uint8ClampedArray(rgbaBuffer);
+  const imgData = new ImageData(rgba, 192, 192);
+  palmPreviewCtx.putImageData(imgData, 0, 0);
+}
+
 function updateSelfViewBtn() {
   selfViewBtn.textContent = selfViewVisible ? 'Hide Self' : 'Self View';
   selfViewBtn.style.color = selfViewVisible ? '#4fc3f7' : '#888';
@@ -1334,6 +1403,7 @@ function handleHandResult(hands, opts = {}) {
     const entry = slotted[h];
     if (!entry) {
       currentHands[h] = null;
+      currentWorldHands[h] = null;
       displayedHands[h] = null;
       handStates[h].pinching = false;
       handStates[h].openCount = 0;
@@ -1345,6 +1415,22 @@ function handleHandResult(hands, opts = {}) {
       continue;
     }
     const hand = entry.landmarks;
+    // World landmarks: live bone-length monitor
+    const wl = entry.worldLandmarks;
+    if (h === 0 && wl && wl.length > 0 && (!handleHandResult._lastWLLog || now - handleHandResult._lastWLLog > 500)) {
+      handleHandResult._lastWLLog = now;
+      const bone = (a, b) => Math.hypot(wl[a].x-wl[b].x, wl[a].y-wl[b].y, wl[a].z-wl[b].z) * 100;
+      const w2m = bone(0, 9);   // wrist → middle MCP
+      const palmW = bone(5, 17); // index MCP → pinky MCP
+      const w2i = bone(0, 5);   // wrist → index MCP
+      const w2p = bone(0, 17);  // wrist → pinky MCP
+      const idx = bone(5, 8);   // index finger length (MCP → TIP)
+      const cm = (v) => `(${(v.x*100).toFixed(1)},${(v.y*100).toFixed(1)},${(v.z*100).toFixed(1)})`;
+      log('heartbeat',
+        `[WORLD-3D] palm=${palmW.toFixed(1)}cm` +
+        ` wrist=${cm(wl[0])} idx=${cm(wl[5])} pnk=${cm(wl[17])} mid=${cm(wl[9])}`
+      );
+    }
     // Filter each landmark
     const filtered = hand.map((lm, j) => ({
       x: handFilters[h][j][0].filter(lm.x, now),
@@ -1352,54 +1438,69 @@ function handleHandResult(hands, opts = {}) {
       z: handFilters[h][j][2].filter(lm.z, now),
     }));
     currentHands[h] = filtered;
+    currentWorldHands[h] = (wl && wl.length > 0) ? wl : null;
 
-    // Palm orientation from triangle: wrist(0), index_MCP(5), pinky_MCP(17).
-    // Two edges + cross product → full 3D orientation frame.
-    const HAND_Z_SCALE = 3.7;
-    const w  = filtered[0], im = filtered[5], pm = filtered[17];
-    // Edge vectors in normalized landmark space (z scaled to match x/y units)
-    const e1 = { x: im.x - w.x, y: im.y - w.y, z: (im.z - w.z) * HAND_Z_SCALE }; // wrist→index
-    const e2 = { x: pm.x - w.x, y: pm.y - w.y, z: (pm.z - w.z) * HAND_Z_SCALE }; // wrist→pinky
-    // Cross product → palm normal
-    const nx = e1.y * e2.z - e1.z * e2.y;
-    const ny = e1.z * e2.x - e1.x * e2.z;
-    const nz = e1.x * e2.y - e1.y * e2.x;
-    const nLen = Math.hypot(nx, ny, nz) || 1;
-    const palmNormal = { x: nx / nLen, y: ny / nLen, z: nz / nLen };
-    // Palm "across" vector (index→pinky direction)
-    const ax = im.x - pm.x, ay = im.y - pm.y, az = (im.z - pm.z) * HAND_Z_SCALE;
-    const aLen = Math.hypot(ax, ay, az) || 1;
-    const palmAcross = { x: ax / aLen, y: ay / aLen, z: az / aLen };
-    // Palm "up" = normal × across (orthogonalized)
-    const ux = palmNormal.y * palmAcross.z - palmNormal.z * palmAcross.y;
-    const uy = palmNormal.z * palmAcross.x - palmNormal.x * palmAcross.z;
-    const uz = palmNormal.x * palmAcross.y - palmNormal.y * palmAcross.x;
-    const uLen = Math.hypot(ux, uy, uz) || 1;
+    if (worldRecording_active && wl && wl.length > 0) {
+      worldRecording.push({
+        t: now,
+        hand: h,
+        normalized: hand.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+        world: wl.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+      });
+    }
 
-    // Palm size: use "across" (index MCP → pinky MCP) 3D distance.
-    // When palm faces camera this is the full width; when knife-edge it
-    // collapses in 2D but the z component compensates.
-    const palmSize3D = Math.hypot(ax, ay, az);
-    // Also compute wrist→mid_MCP height
-    const hx = (e1.x + e2.x) * 0.5, hy = (e1.y + e2.y) * 0.5, hz = (e1.z + e2.z) * 0.5;
-    const palmHeight3D = Math.hypot(hx, hy, hz);
-    // Use the geometric mean of width and height -- both are rotation-invariant
-    // individually, and the mean is even more stable.
-    const palmSize = Math.sqrt(palmSize3D * palmHeight3D);
-    if (refPalmSize[h] === 0) refPalmSize[h] = palmSize;
-    const rawHandZ = -((palmSize / refPalmSize[h]) - 1);
-    handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+    // Palm orientation from world landmarks (true 3D in meters).
+    // World coords: x = right, y = down(?), z = toward camera(?).
+    // Cross product of palm triangle edges gives clean normal.
+    // Necker flip: negate normal so it points "into the screen" (matching
+    // user's perception of back-of-hand reaching into the scene).
+    if (wl && wl.length >= 18) {
+      const ww = wl[0], wi = wl[5], wp = wl[17];
+      const e1x = wi.x - ww.x, e1y = wi.y - ww.y, e1z = wi.z - ww.z;
+      const e2x = wp.x - ww.x, e2y = wp.y - ww.y, e2z = wp.z - ww.z;
+      let nx = e1y * e2z - e1z * e2y;
+      let ny = e1z * e2x - e1x * e2z;
+      let nz = e1x * e2y - e1y * e2x;
+      const nLen = Math.hypot(nx, ny, nz) || 1;
+      nx /= nLen; ny /= nLen; nz /= nLen;
+      // Necker flip
+      nx = -nx; ny = -ny; nz = -nz;
+      const ax = wi.x - wp.x, ay = wi.y - wp.y, az = wi.z - wp.z;
+      const aLen = Math.hypot(ax, ay, az) || 1;
 
-    // Orientation angles for diagnostics
-    const pitch = Math.asin(-palmNormal.y) * 180 / Math.PI;
-    const yaw   = Math.atan2(palmNormal.x, palmNormal.z) * 180 / Math.PI;
-    if (h === 0 && (!handleHandResult._lastZLog || now - handleHandResult._lastZLog > 500)) {
-      handleHandResult._lastZLog = now;
-      log('heartbeat',
-        `[HAND-Z] w=${palmSize3D.toFixed(4)} h=${palmHeight3D.toFixed(4)} geo=${palmSize.toFixed(4)}` +
-        ` | ref=${refPalmSize[h].toFixed(4)} raw=${rawHandZ.toFixed(4)} filt=${handZPos[h].toFixed(4)}` +
-        ` | pitch=${pitch.toFixed(1)} yaw=${yaw.toFixed(1)}`
+      const pitch = Math.asin(-ny) * 180 / Math.PI;
+      const yaw   = Math.atan2(nx, nz) * 180 / Math.PI;
+
+      // Palm size from world landmarks (rotation-invariant, in meters)
+      const palmWidthM = Math.hypot(ax, ay, az);
+      const palmHeightM = Math.hypot(
+        (e1x + e2x) * 0.5, (e1y + e2y) * 0.5, (e1z + e2z) * 0.5
       );
+      const palmSizeM = Math.sqrt(palmWidthM * palmHeightM);
+
+      // Z estimation: for each bone, screen_length / world_length = cos(theta) * f/D.
+      // The bone most perpendicular to the camera has cos(theta) ~ 1, giving
+      // the truest distance signal. Take the MAX ratio across bones -- at any
+      // hand orientation, at least one bone is roughly perpendicular.
+      const imN = filtered[5], pmN = filtered[17], wN = filtered[0];
+      const screenW = Math.hypot(imN.x - pmN.x, imN.y - pmN.y);
+      const midX = (imN.x + pmN.x) * 0.5, midY = (imN.y + pmN.y) * 0.5;
+      const screenH = Math.hypot(wN.x - midX, wN.y - midY);
+      const ratioW = palmWidthM > 0.001 ? screenW / palmWidthM : 0;
+      const ratioH = palmHeightM > 0.001 ? screenH / palmHeightM : 0;
+      const bestRatio = Math.max(ratioW, ratioH);
+      if (refPalmSize[h] === 0) refPalmSize[h] = bestRatio;
+      const rawHandZ = -((bestRatio / refPalmSize[h]) - 1);
+      handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+
+      if (h === 0 && (!handleHandResult._lastZLog || now - handleHandResult._lastZLog > 500)) {
+        handleHandResult._lastZLog = now;
+        const winner = ratioW >= ratioH ? 'W' : 'H';
+        log('heartbeat',
+          `[HAND-Z] rW=${ratioW.toFixed(2)} rH=${ratioH.toFixed(2)} best=${bestRatio.toFixed(2)}(${winner})` +
+          ` | ref=${refPalmSize[h].toFixed(2)} Z=${handZPos[h].toFixed(3)}`
+        );
+      }
     }
     handConf[h] = entry.handFlag || 0;
 
@@ -1524,7 +1625,7 @@ function handleGestureInput() {
           z: (drawHand[4].z + drawHand[8].z) / 2,
         };
       }
-      const pos = landmarkToScene(holdPoint);
+      const pos = landmarkToScene(holdPoint, zMode === 'hand' ? handZPos[h] : undefined);
       if (gestureMode === 'grab') {
         pos.y += 0.5;
         pos.z -= 1.0;
@@ -1630,7 +1731,10 @@ function initMediaPipeBackend(numHands) {
 }
 
 function sendMediaPipeFrames() {
-  if (document.hidden) return;
+  if (document.hidden) {
+    video.requestVideoFrameCallback(sendMediaPipeFrames);
+    return;
+  }
   if (!faceReady && !handReady) {
     video.requestVideoFrameCallback(sendMediaPipeFrames);
     return;
@@ -1849,6 +1953,7 @@ function processWebGPUHands() {
   gpuHandTracker.processFrame(video).then(result => {
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
+    if (result.palmPreview) drawPalmPreview(result.palmPreview);
     // WebGPU Vision pipeline returns a fixed 2-element `hands` array in
     // stable slot order (centroid-based identity tracking). Pass `stable:true`
     // so handleHandResult skips its MediaPipe-only handedness sort.
@@ -2121,13 +2226,20 @@ function animate(timestamp) {
   animate._n++;
   if (animate._n === 1) log('lifecycle', '[lifecycle] animate() first call');
   if (animate._n === 3) log('lifecycle', '[lifecycle] animate() rAF chain alive (frame 3)');
+  if (animate._n % 300 === 0) log('lifecycle', `[lifecycle] animate() frame ${animate._n} (ts=${timestamp.toFixed(0)})`);
   // Dedupe parallel animate chains: when the tab is hidden then re-shown,
   // the throttled-old rAF and the visibilitychange-spawned new rAF can both
   // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
   // the second one returns here and the chain merges back into one.
-  if (timestamp === lastAnimateTimestamp) return;
+  if (timestamp === lastAnimateTimestamp) {
+    log('lifecycle', `[lifecycle] animate() DEDUPE BAIL frame ${animate._n} ts=${timestamp.toFixed(0)} -- rAF chain DIES here`);
+    return;
+  }
   lastAnimateTimestamp = timestamp;
-  if (document.hidden) { console.warn('[lifecycle] animate() bailed: document.hidden'); return; }
+  if (document.hidden) {
+    console.warn(`[lifecycle] animate() HIDDEN BAIL frame ${animate._n} -- rAF chain DIES here`);
+    return;
+  }
   requestAnimationFrame(animate);
   // COI service worker reloads the page without user activation, so Chrome
   // can throttle rAF to 1fps. Detect this and pump via setTimeout until
@@ -2163,28 +2275,42 @@ function animate(timestamp) {
   updateHandSkeletons();
   for (let h = 0; h < 2; h++) {
     const axes = handOrientAxes[h];
-    if (currentHands[h]) {
+    const wlr = currentWorldHands[h];
+    if (currentHands[h] && wlr && wlr.length >= 18) {
       const lm = currentHands[h];
-      const p0  = landmarkToScene(lm[0]);   // wrist
-      const p5  = landmarkToScene(lm[5]);   // index MCP
-      const p17 = landmarkToScene(lm[17]);  // pinky MCP
-
-      // Palm center
+      const pzA = zMode === 'hand' ? handZPos[h] : undefined;
+      const p0  = landmarkToScene(lm[0], pzA);
+      const p5  = landmarkToScene(lm[5], pzA);
+      const p17 = landmarkToScene(lm[17], pzA);
       const center = new THREE.Vector3(
         (p0.x + p5.x + p17.x) / 3,
         (p0.y + p5.y + p17.y) / 3,
         (p0.z + p5.z + p17.z) / 3,
       );
 
-      // The 2D hand projection is a Necker cube: the model tracks "palm
-      // toward camera" but the eye sees "back of hand reaching into screen."
-      // Negate z in the edge vectors to flip to the mirror interpretation
-      // so the cross product gives the normal your eyes expect.
-      const v1 = new THREE.Vector3(p5.x - p0.x, p5.y - p0.y, -(p5.z - p0.z));
-      const v2 = new THREE.Vector3(p17.x - p0.x, p17.y - p0.y, -(p17.z - p0.z));
-      const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
+      // Orientation from world landmarks (meters, true 3D)
+      const ww = wlr[0], wi = wlr[5], wp = wlr[17];
+      const e1x = wi.x - ww.x, e1y = wi.y - ww.y, e1z = wi.z - ww.z;
+      const e2x = wp.x - ww.x, e2y = wp.y - ww.y, e2z = wp.z - ww.z;
+      let nx = e1y * e2z - e1z * e2y;
+      let ny = e1z * e2x - e1x * e2z;
+      let nz = e1x * e2y - e1y * e2x;
+      let nLen = Math.hypot(nx, ny, nz) || 1;
+      nx /= nLen; ny /= nLen; nz /= nLen;
+      // Necker flip: raw normal points toward camera (into palm).
+      // Negate so it points away from camera (out back of hand).
+      nx = -nx; ny = -ny; nz = -nz;
 
-      const across = new THREE.Vector3(p5.x - p17.x, p5.y - p17.y, -(p5.z - p17.z)).normalize();
+      let ax = wi.x - wp.x, ay = wi.y - wp.y, az = wi.z - wp.z;
+      let aLen = Math.hypot(ax, ay, az) || 1;
+      ax /= aLen; ay /= aLen; az /= aLen;
+
+      // World coords: x=right-in-camera, y=down, z=toward camera.
+      // Scene (THREE.js): x=right, y=up, camera looks down -z.
+      // Camera is mirrored (selfie), so world-x-right = scene-x-LEFT.
+      // world y down = scene y UP (negate). world z toward cam = scene +z.
+      const normal = new THREE.Vector3(-nx, -ny, nz).normalize();
+      const across = new THREE.Vector3(-ax, -ay, az).normalize();
       const up = new THREE.Vector3().crossVectors(normal, across).normalize();
 
       axes.group.position.copy(center);
@@ -2196,6 +2322,39 @@ function animate(timestamp) {
       axes.group.visible = false;
     }
   }
+  // Z-depth demo balls: one per hand, destroy cubes on contact
+  const ZBALL_HIT_SQ = 0.49;
+  for (let h = 0; h < 2; h++) {
+    if (zMode === 'ball' && currentHands[h]) {
+      const lm = currentHands[h];
+      const palmCenter = {
+        x: (lm[0].x + lm[5].x + lm[17].x) / 3,
+        y: (lm[0].y + lm[5].y + lm[17].y) / 3,
+        z: (lm[0].z + lm[5].z + lm[17].z) / 3,
+      };
+      const scenePos = landmarkToScene(palmCenter);
+      scenePos.z = camera.position.z - 6 + handZPos[h] * 6;
+      zBalls[h].position.copy(scenePos);
+      zBalls[h].visible = true;
+      const bx = scenePos.x, by = scenePos.y, bz = scenePos.z;
+      for (let i = 0; i < cubeData.length; i++) {
+        const c = cubeData[i];
+        if (!c.alive) continue;
+        const dx = bx - c.x, dy = by - c.y, dz = bz - c.z;
+        if (dx * dx + dy * dy + dz * dz < ZBALL_HIT_SQ) {
+          c.alive = false;
+          _dummy.position.set(0, 0, 0);
+          _dummy.scale.setScalar(0);
+          _dummy.updateMatrix();
+          cubesMesh.setMatrixAt(i, _dummy.matrix);
+          cubesMesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    } else {
+      zBalls[h].visible = false;
+    }
+  }
+
   handleGestureInput();
 
   // Rotate cubes + update instanced mesh
@@ -2506,6 +2665,7 @@ function buildLogGatesPanel() {
 // Safe to call before the camera or ML models are ready -- the animate()
 // loop just renders the empty 3D scene until tracking comes online.
 function revealSceneUI() {
+  log('lifecycle', `[lifecycle] revealSceneUI() hidden=${document.hidden} lastAnimateTs=${lastAnimateTimestamp}`);
   document.getElementById('controls').style.display = 'block';
   if (!isIPhone) {
     document.getElementById('hud').style.display = 'block';
@@ -2746,10 +2906,12 @@ window.addEventListener('resize', () => {
 
 // Pause all processing when tab is hidden, resume when visible
 document.addEventListener('visibilitychange', () => {
+  log('lifecycle', `[lifecycle] visibilitychange hidden=${document.hidden} animateFrame=${animate._n} srcObject=${!!video.srcObject}`);
   if (!document.hidden && video.srcObject) {
     clock.getDelta(); // flush stale dt so projectiles don't teleport
     frameCount = 0;
     lastFpsTime = performance.now();
+    log('lifecycle', `[lifecycle] visibilitychange RESTARTING animate + rVFC`);
     requestAnimationFrame(animate);
     if (activeBackend === 'mediapipe') {
       video.requestVideoFrameCallback(sendMediaPipeFrames);

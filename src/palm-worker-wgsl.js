@@ -20,6 +20,7 @@ let anchors = null;
 let device = null;
 let inputBuf = null;
 let compiled = false;
+let previewReadBuf = null;
 
 // GPU letterbox (same as before -- preprocesses camera frame to model input)
 let letterboxPipeline = null;
@@ -61,7 +62,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     b = pixel.b;
   }
 
-  // Output as NCHW: channel-first layout for the model
+  // Output as NCHW: channel-first layout (engine compiles Transpose out)
   let spatial = ${PALM_SIZE}u * ${PALM_SIZE}u;
   let idx = y * ${PALM_SIZE}u + x;
   output[idx]               = r;
@@ -86,6 +87,7 @@ async function initGPU() {
 
   uniformBuffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  previewReadBuf = device.createBuffer({ size: PALM_SIZE * PALM_SIZE * 3 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
 
   // Load model
   const graph = await (await fetch(MODEL_JSON_URL)).json();
@@ -200,9 +202,28 @@ self.onmessage = async (e) => {
       // Single encoder: letterbox + inference + readback in one submit
       const enc = device.createCommandEncoder();
       encodeLetterbox(enc);
+
       runner.encodeInto(enc);
+      enc.copyBufferToBuffer(letterboxOutputBuf, 0, previewReadBuf, 0, previewReadBuf.size);
       device.queue.submit([enc.finish()]);
       const outputs = await runner.readOutputs();
+
+      // Read back letterbox for preview (NCHW float32 -> RGBA uint8)
+      let previewRGBA = null;
+      try {
+        await previewReadBuf.mapAsync(GPUMapMode.READ);
+        const nchw = new Float32Array(previewReadBuf.getMappedRange().slice(0));
+        previewReadBuf.unmap();
+        const S = PALM_SIZE * PALM_SIZE;
+        const rgba = new Uint8ClampedArray(S * 4);
+        for (let i = 0; i < S; i++) {
+          rgba[i * 4]     = nchw[i] * 255;
+          rgba[i * 4 + 1] = nchw[S + i] * 255;
+          rgba[i * 4 + 2] = nchw[2 * S + i] * 255;
+          rgba[i * 4 + 3] = 255;
+        }
+        previewRGBA = rgba.buffer;
+      } catch (_) {}
 
       // Decode outputs -- find regressors (dim 18) and scores (dim 1)
       let regressors, scores;
@@ -222,9 +243,17 @@ self.onmessage = async (e) => {
       }
 
       let detections = decodeDetections(regressors, scores, anchors);
+      const preNMS = detections.length;
+      const preDetail = detections.map(d => `(${(d.cx*100).toFixed(0)},${(d.cy*100).toFixed(0)} ${(d.w*100).toFixed(0)}x${(d.h*100).toFixed(0)} s=${d.score.toFixed(2)})`).join(' ');
       detections = weightedNMS(detections);
+      if (preNMS > 0) {
+        console.log(`[palm-det] pre(${preNMS}): ${preDetail} -> post(${detections.length}): ${detections.map(d => `(${(d.cx*100).toFixed(0)},${(d.cy*100).toFixed(0)})`).join(' ')}`);
+      }
 
-      self.postMessage({ type: 'detections', detections, letterbox });
+      const msg = { type: 'detections', detections, letterbox };
+      const transfer = [];
+      if (previewRGBA) { msg.previewRGBA = previewRGBA; transfer.push(previewRGBA); }
+      self.postMessage(msg, transfer);
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });
     }

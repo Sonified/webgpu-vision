@@ -22,7 +22,7 @@ const logLandmark = makeLogger('tracking', 2000);
 class PalmWorker {
   constructor() {
     this.worker = new Worker(
-      workerUrlWithGates(new URL('./palm-worker-wgsl.js', import.meta.url)),
+      workerUrlWithGates(new URL('./palm-worker.js', import.meta.url)),
       { type: 'module' }
     );
     registerWorkerForGateUpdates(this.worker);
@@ -53,7 +53,7 @@ class PalmWorker {
   detect(frame) {
     return new Promise((resolve) => {
       this.pendingResolve = resolve;
-      this.worker.postMessage({ type: 'detect', frame }, [frame]);
+      this.worker.postMessage({ type: 'detect', bitmap: frame, frame }, [frame]);
     });
   }
 
@@ -61,7 +61,7 @@ class PalmWorker {
     if (e.data.type === 'detections' && this.pendingResolve) {
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
-      resolve({ detections: e.data.detections, letterbox: e.data.letterbox });
+      resolve({ detections: e.data.detections, letterbox: e.data.letterbox, previewRGBA: e.data.previewRGBA });
     } else if (e.data.type === 'error') {
       console.error('Palm worker error:', e.data.message);
       if (this.pendingResolve) {
@@ -127,8 +127,21 @@ class LandmarkWorker {
         }
       }
 
+      let worldLandmarks = [];
+      if (e.data.worldLandmarks) {
+        const flat = new Float32Array(e.data.worldLandmarks);
+        for (let i = 0; i < 21; i++) {
+          worldLandmarks.push({
+            x: flat[i * 3],
+            y: flat[i * 3 + 1],
+            z: flat[i * 3 + 2],
+          });
+        }
+      }
+
       resolve({
         landmarks,
+        worldLandmarks,
         handFlag: e.data.handFlag,
         handedness: e.data.handedness,
       });
@@ -299,10 +312,13 @@ export class HandTracker {
           let closeThreshSq = 40 * 40;
           for (const s of this.slots) {
             if (!s.active || !s.rect) continue;
-            const roiW = s.rect.w;
-            if (roiW * roiW > closeThreshSq) closeThreshSq = roiW * roiW;
+            const excl = s.rect.w * 0.75;
+            if (excl * excl > closeThreshSq) closeThreshSq = excl * excl;
           }
-          if (n.minDistSqToActive < closeThreshSq) continue;
+          if (n.minDistSqToActive < closeThreshSq) {
+            console.log(`[palm-reject] det at (${n.point.x.toFixed(0)},${n.point.y.toFixed(0)}) too close: dist=${Math.sqrt(n.minDistSqToActive).toFixed(0)}px < thresh=${Math.sqrt(closeThreshSq).toFixed(0)}px`);
+            continue;
+          }
 
           let bestSlot = emptySlots[0];
           let bestDist = Infinity;
@@ -338,9 +354,16 @@ export class HandTracker {
         && distSq(s0.centroid, s1.centroid) < 80 * 80;
       if ((hasEmptySlots || slotsOverlapping) && !this.palmDetecting) {
         this.palmDetecting = true;
+        this._palmAttempts = (this._palmAttempts || 0) + 1;
+        const attemptNum = this._palmAttempts;
+        const t0 = performance.now();
         const frame = new VideoFrame(video);
         this.palmWorker.detect(frame).then(result => {
           this.palmDetecting = false;
+          const ms = (performance.now() - t0).toFixed(1);
+          const empty = this.slots.filter(s => !s.active).length;
+          console.log(`[palm-search] attempt #${attemptNum}: ${result.detections.length} det in ${ms}ms, ${empty} empty slot(s)`);
+          if (result.previewRGBA) this._lastPreview = result.previewRGBA;
           if (result.detections.length > 0) {
             logPalm(`[palm] ${result.detections.length} detections`);
             this.pendingDetections = result;
@@ -370,6 +393,7 @@ export class HandTracker {
           handFlag: r.result.handFlag,
           handedness: r.result.handedness,
           landmarks: r.result.landmarks,
+          worldLandmarks: r.result.worldLandmarks,
           centroid: palmCentroid(r.result.landmarks, vw, vh),
         });
       }
@@ -435,6 +459,7 @@ export class HandTracker {
         if (a) {
           slot.missFrames = 0;
           slot.landmarks = a.landmarks;
+          slot.worldLandmarks = a.worldLandmarks;
           slot.centroid = a.centroid;
           slot.lastHandedness = a.handedness;
           slot.lastHandFlag = a.handFlag;
@@ -451,6 +476,7 @@ export class HandTracker {
             slot.lastCentroid = slot.centroid;
             slot.active = false;
             slot.landmarks = null;
+            slot.worldLandmarks = null;
             slot.centroid = null;
             slot.missFrames = 0;
           }
@@ -463,16 +489,21 @@ export class HandTracker {
       // same physical hand across frames. Null = that slot is empty.
       const hands = this.slots.map(s => {
         if (!s.landmarks) return null;
-        return { landmarks: s.landmarks, handedness: s.lastHandedness, handFlag: s.lastHandFlag || 0 };
+        return { landmarks: s.landmarks, worldLandmarks: s.worldLandmarks || [], handedness: s.lastHandedness, handFlag: s.lastHandFlag || 0 };
       });
 
       logLandmark(`[tracking] slots: ${this.slots.map(s => s.active ? String(s.index) : '_').join(',')}`);
 
-      return {
+      const result = {
         hands,
         stableIdentity: true,
         debug: { rects: this.slots.filter(s => s.rect).map(s => s.rect) },
       };
+      if (this._lastPreview) {
+        result.palmPreview = this._lastPreview;
+        this._lastPreview = null;
+      }
+      return result;
     } catch (err) {
       console.error('processFrame error:', err.message, err.stack);
       return { hands: [] };

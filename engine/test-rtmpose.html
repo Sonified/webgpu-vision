@@ -5,8 +5,8 @@
 <div style="margin-bottom:12px;">
   <label style="color:#ccc;">Pipeline:
     <select id="mode" style="font:14px monospace;background:#222;color:#0f0;border:1px solid #555;padding:4px 8px;">
-      <option value="wgsl">WebGPU Vision (our WGSL) - 3.9MB</option>
-      <option value="sparse">Sparse (MediaPipe family, batched) - 10.1MB</option>
+      <option value="wgsl">hand_landmark_4mb (our WGSL) - 3.9MB</option>
+      <option value="sparse">hand_landmark_10mb (batched) - 10.1MB</option>
       <option value="rtmpose">RTMPose fp32 (ORT WebGPU) - 53MB</option>
       <option value="rtmpose16">RTMPose fp16 (ORT WebGPU) - 26MB</option>
     </select>
@@ -66,8 +66,8 @@ modeSelect.onchange = async () => {
 
   if (newMode === 'sparse' && !sparseSession) {
     switching = true;
-    statusEl.textContent = 'Loading Sparse model (10.1MB)...';
-    log('\nLazy-loading Sparse (MediaPipe family)...');
+    statusEl.textContent = 'Loading hand_landmark_10mb...';
+    log('\nLazy-loading hand_landmark_10mb...');
     await loadSparse();
     statusEl.textContent = 'Ready';
     switching = false;
@@ -166,7 +166,7 @@ async function _loadOrtSession(modelPath, label, h = INPUT_H, w = INPUT_W) {
 
 async function loadSparse() {
   sparseSession = await _loadOrtSession(
-    '../models/hand_landmark_sparse_Nx3x224x224.onnx', 'Sparse', SPARSE_H, SPARSE_W
+    '../models/hand_landmark_sparse_Nx3x224x224.onnx', 'hand_landmark_10mb', SPARSE_H, SPARSE_W
   );
 }
 
@@ -310,8 +310,8 @@ try {
   log('WebGPU Vision ready');
 
   if (currentMode === 'sparse') {
-    statusEl.textContent = 'Loading Sparse model (10.1MB)...';
-    log('\nLazy-loading Sparse (saved preference)...');
+    statusEl.textContent = 'Loading hand_landmark_10mb...';
+    log('\nLazy-loading hand_landmark_10mb (saved preference)...');
     await loadSparse();
   } else if (currentMode === 'rtmpose') {
     statusEl.textContent = 'Loading RTMPose fp32 (53MB)...';
@@ -453,7 +453,7 @@ try {
       const avg = times.length ? times.reduce((a,b) => a+b) / times.length : 0;
       ctx.fillStyle = '#0af';
       ctx.font = '16px monospace';
-      ctx.fillText(`Sparse: ${(lastPipeMs + lastSparseMs).toFixed(1)}ms`, 10, 24);
+      ctx.fillText(`10mb: ${(lastPipeMs + lastSparseMs).toFixed(1)}ms`, 10, 24);
       ctx.fillText(`  Track: ${lastPipeMs.toFixed(1)}ms  Landmark: ${lastSparseMs.toFixed(1)}ms`, 10, 46);
       ctx.fillText(`Hands: ${sparseHands.length} (batched)`, 10, 68);
 
@@ -498,13 +498,13 @@ try {
       const sorted = [...times].sort((a, b) => a - b);
       const median = sorted[Math.floor(sorted.length / 2)];
       const avg = times.reduce((a,b) => a+b) / times.length;
-      log(`[WGSL] median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (full pipeline, model: 3.9MB)`);
+      log(`[4mb] median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (full pipeline, hand_landmark_4mb)`);
     }
     if (isSparseMode(currentMode) && times.length > 0) {
       const sorted = [...times].sort((a, b) => a - b);
       const median = sorted[Math.floor(sorted.length / 2)];
       const avg = times.reduce((a,b) => a+b) / times.length;
-      log(`[Sparse] track=${lastPipeMs.toFixed(1)}ms landmark=${lastSparseMs.toFixed(1)}ms median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (batched, model: 10.1MB)`);
+      log(`[10mb] track=${lastPipeMs.toFixed(1)}ms landmark=${lastSparseMs.toFixed(1)}ms median=${median.toFixed(1)}ms avg=${avg.toFixed(1)}ms n=${times.length} (batched, hand_landmark_10mb)`);
     }
     if (isRtmMode(currentMode) && times.length > 0) {
       const sorted = [...times].sort((a, b) => a - b);
