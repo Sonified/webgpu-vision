@@ -12,7 +12,8 @@ RESEARCH-*.md
 models/_archive/
 
 # 10mb hand landmark ONNX (not yet converted to WGSL .json/.bin)
-models/hand/hand_landmark_10mb/source/
+models/hand/hand_landmark_10mb/source/*
+!models/hand/hand_landmark_10mb/source/SOURCE.md
 
 # ORT vendor copies (used by test-rtmpose.html, not needed in engine)
 vendor/ort-wasm-simd-threaded.jsep.*
