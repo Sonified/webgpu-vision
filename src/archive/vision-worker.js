@@ -200,10 +200,10 @@ async function init() {
 
   // Load and compile all 4 models
   const [palm, hand, faceDet, faceLm] = await Promise.all([
-    loadModel('../models/palm_detection_lite.json', '../models/palm_detection_lite.bin'),
-    loadModel('../models/hand_landmark_full.json', '../models/hand_landmark_full.bin'),
-    loadModel('../models/face_detector.json', '../models/face_detector.bin'),
-    loadModel('../models/face_landmarks_detector.json', '../models/face_landmarks_detector.bin'),
+    loadModel('../models/hand/palm_detection_lite/palm_detection_lite.json', '../models/hand/palm_detection_lite/palm_detection_lite.bin'),
+    loadModel('../models/hand/hand_landmark_4mb/hand_landmark_full.json', '../models/hand/hand_landmark_4mb/hand_landmark_full.bin'),
+    loadModel('../models/face/face_detector/face_detector.json', '../models/face/face_detector/face_detector.bin'),
+    loadModel('../models/face/face_landmarks/face_landmarks_detector.json', '../models/face/face_landmarks/face_landmarks_detector.bin'),
   ]);
 
   palmRunner = new ModelRunner(device, P, palm.W, palm.allWeightsBuf);

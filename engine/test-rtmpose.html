@@ -76,7 +76,7 @@ modeSelect.onchange = async () => {
     switching = true;
     statusEl.textContent = 'Loading RTMPose fp32 (53MB)...';
     log('\nLazy-loading RTMPose fp32...');
-    await loadRTMPose('../models/rtmpose_hand.onnx', 'fp32');
+    await loadRTMPose('../models/_archive/rtmpose_hand.onnx', 'fp32');
     statusEl.textContent = 'Ready';
     switching = false;
   }
@@ -84,7 +84,7 @@ modeSelect.onchange = async () => {
     switching = true;
     statusEl.textContent = 'Loading RTMPose fp16 (26MB)...';
     log('\nLazy-loading RTMPose fp16...');
-    await loadRTMPose16('../models/rtmpose_hand_fp16.onnx', 'fp16');
+    await loadRTMPose16('../models/_archive/rtmpose_hand_fp16.onnx', 'fp16');
     statusEl.textContent = 'Ready';
     switching = false;
   }
@@ -214,10 +214,10 @@ function decodeSparseOutput(xyzData, rect, vw, vh, offset) {
 }
 
 async function loadRTMPose() {
-  rtmSession = await _loadOrtSession('../models/rtmpose_hand.onnx', 'RTMPose fp32');
+  rtmSession = await _loadOrtSession('../models/_archive/rtmpose_hand.onnx', 'RTMPose fp32');
 }
 async function loadRTMPose16() {
-  rtmSession16 = await _loadOrtSession('../models/rtmpose_hand_fp16.onnx', 'RTMPose fp16');
+  rtmSession16 = await _loadOrtSession('../models/_archive/rtmpose_hand_fp16.onnx', 'RTMPose fp16');
 }
 
 // Crop helper for RTMPose

@@ -15,7 +15,7 @@ import onnx
 from onnx import helper, TensorProto
 import onnxruntime as ort
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'palm_detection_lite.onnx')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'hand', 'palm_detection_lite', 'source', 'palm_detection_lite.onnx')
 PALM_SIZE = 192
 
 def letterbox(img_path):

@@ -20,8 +20,8 @@ try {
   const device = await adapter.requestDevice();
   log('WebGPU ready');
 
-  const graph = await (await fetch('../models/face_detector.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/face_detector.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/face/face_detector/face_detector.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/face/face_detector/face_detector.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
 
   const W = {};
@@ -99,7 +99,7 @@ try {
   try {
     const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
     ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
-    const sess = await ort.InferenceSession.create('../models/face_detector.onnx', { executionProviders: ['wasm'] });
+    const sess = await ort.InferenceSession.create('../models/face/face_detector/source/face_detector.onnx', { executionProviders: ['wasm'] });
     const tensor = new ort.Tensor('float32', new Float32Array(128*128*3).fill(0.5), [1, 128, 128, 3]);
     for (let i = 0; i < 5; i++) await sess.run({ input: tensor });
     const ot0 = performance.now();

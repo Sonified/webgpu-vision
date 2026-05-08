@@ -12,8 +12,8 @@ import { weightedNMS } from './nms.js';
 applyLogGatesFromUrl();
 
 const PALM_SIZE = 192;
-const MODEL_JSON_URL = '../models/palm_detection_lite.json';
-const MODEL_BIN_URL = '../models/palm_detection_lite.bin';
+const MODEL_JSON_URL = '../models/hand/palm_detection_lite/palm_detection_lite.json';
+const MODEL_BIN_URL = '../models/hand/palm_detection_lite/palm_detection_lite.bin';
 
 let runner = null;
 let anchors = null;

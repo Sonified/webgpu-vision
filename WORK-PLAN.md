@@ -443,7 +443,11 @@ The bug corrupted the multi-scale feature pyramid that feeds both detection head
 - `dumps/hand_000/` -- Reference activations for hand_000.png
 - `capture/` -- Webcam frame capture tool (built 28 test images in `images/test_images/hand_images/`)
 
-**Status:** Fix is on branch `wgsl-detection-lag`, not yet tested live. The head-to-head race wiring (ORT shadow worker) is still in `src/pipeline.js` for validation. Once confirmed live, the ORT shadow can be removed and the branch merged to main.
+**Status:** Fix merged to main 2026-05-08. Live-tested with webcam -- palm detection is smooth, scores at full strength, no ghost detections. ORT shadow race wiring removed from `src/pipeline.js`.
+
+### Known issue: WebGPU hand detection is sequential and slightly slower than MediaPipe
+
+WebGPU Vision detects and tracks hands one at a time (slot 0 then slot 1), whereas MediaPipe's sealed pipeline processes both in a single pass. This makes two-hand tracking slightly slower overall. In practice the difference is close enough to parity that most users won't notice -- the pipeline still runs comfortably at interactive framerates. Worth revisiting if/when WebGPU's parallel dispatch story matures or if we move to a batched landmark model, but not blocking anything right now.
 
 ### Known issue: face detection tracking preview not cleaned up on toggle off
 
@@ -680,7 +684,7 @@ Runs on iOS Safari (pure WebGPU, no ONNX Runtime, no WASM). Confirmed working on
 - **Hand identity tracking** (DONE 2026-04-17): pipeline now uses palm-centroid identity tracking, duplicate detection with tunable slider in the drawer, and palm re-anchor while hands overlap. At parity with or better than MediaPipe in most cases. Full overlap still imperfect -- see "hand identity can swap" known issue.
 - **SpellARia Motion Signature Recorder (CRITICAL PATH)**: build the data-collection tool NOW, start collecting a labeled dataset of reversals vs terminations. This is the path to the prediction classifier that eliminates perceived latency. Data collection is the long pole -- wall-clock time spent physically performing motions. See "CRITICAL PATH: SpellARia Motion Signature Recorder" section below.
 - **RTMPose hand-only evaluation** (DONE 2026-04-20): RTMPose ruled out (too big, too slow). Discovered `hand_landmark_10mb` (10.1MB, 2,643,047 params, same MediaPipe family, vastly superior pinch tracking). See "RTMPose hand-only evaluation" section below.
-- **Port hand_landmark_10mb to WGSL engine** (NEXT UP, HIGH PRIORITY): same architecture as hand_landmark_4mb, just wider layers. ONNX file exists at `models/hand_landmark_sparse_Nx3x224x224.onnx` (10.1MB, 2,643,047 params). Needs `onnx_to_json.py` conversion script (doesn't exist yet -- `onnx` Python package is installed). Compile through ModelRunner. Should need zero new ops. Estimated ~5-8ms/hand vs current ~3-4ms/hand. Batch dimension enables both-hands-in-one-call. Better pinch/thumb tracking + potentially better z signal for orientation work. See "Next: port hand_landmark_10mb to WGSL engine" section below.
+- **Port hand_landmark_10mb to WGSL engine** (NEXT UP, HIGH PRIORITY): Evaluated via ORT WebGPU in `engine/test-rtmpose.html` A/B test page -- pinch/thumb tracking vastly superior to 4mb model. NOT yet ported to WGSL engine: needs `onnx_to_json.py` conversion (doesn't exist yet), then compile through ModelRunner (should need zero new ops). ONNX file exists at `models/hand_landmark_sparse_Nx3x224x224.onnx` (10.1MB, 2,643,047 params). Estimated ~5-8ms/hand via WGSL. Batch dimension enables both-hands-in-one-call. See "Next: port hand_landmark_10mb to WGSL engine" section below.
 - **Z-axis depth estimation** (IN PROGRESS 2026-04-24): World landmarks wired through pipeline. Discovered world landmarks are hand-relative (rotate with the hand), NOT camera-relative -- useless for orientation but give rotation-invariant bone lengths in meters (~6.3cm palm width). Current approach: max(screenW/worldW, screenH/worldH) picks the bone most perpendicular to camera as distance proxy. Ball + hand-translation Z modes added to demo. Still tuning rotation invariance. See HAND-LANDMARK-OUTPUTS.md.
 - **Hand orientation axes** (IN PROGRESS 2026-04-24): RGB arrow visualization of palm coordinate frame. World landmarks can't solve this (hand-relative frame). Normalized landmarks need better z handling. Unsolved -- see HAND-LANDMARK-OUTPUTS.md for full analysis of failed approaches.
 - Hand parallax compensation using the derived z-depth.
@@ -762,7 +766,7 @@ While searching PINTO0309's model zoo for alternatives, we found `hand_landmark_
 - Same output format: `xyz_x21 [N, 63]`, `hand_score [N, 1]`, `lefthand_or_righthand [N, 1]`
 - **Pinch tracking is VASTLY superior** to hand_landmark_4mb
 
-Running through ORT WebGPU (not yet ported to our WGSL engine), hand_landmark_10mb does both hands batched in ~11ms. Through our fused WGSL engine, estimated ~5-8ms per hand.
+Tested through ORT WebGPU in `engine/test-rtmpose.html` (a full A/B comparison page with model selector), hand_landmark_10mb does both hands batched in ~11ms. Not yet ported to our WGSL engine -- needs the `onnx_to_json.py` conversion step. Through our fused WGSL engine, estimated ~5-8ms per hand.
 
 **Test page:** `engine/test-rtmpose.html` has a dropdown to switch between all four models live. Uses `requestVideoFrameCallback` + fire-and-forget pattern matching ball-toss demo.
 
@@ -774,13 +778,18 @@ Running through ORT WebGPU (not yet ported to our WGSL engine), hand_landmark_10
 
 ### Next: port hand_landmark_10mb to WGSL engine
 
-hand_landmark_10mb is the clear upgrade path. Same architecture as hand_landmark_4mb (which our WGSL engine already runs), just wider. The port:
+hand_landmark_10mb is the clear upgrade path. Same architecture as hand_landmark_4mb (which our WGSL engine already runs), just wider.
+
+**What's done:** Evaluated via ORT WebGPU in `engine/test-rtmpose.html` -- an A/B test page comparing WGSL pipeline (4mb), ORT RTMPose fp32/fp16, and ORT hand_landmark_10mb. Pinch/thumb tracking confirmed vastly superior. ~11ms both hands batched via ORT WebGPU.
+
+**What's NOT done -- the WGSL port:**
 
 1. Write `onnx_to_json.py` conversion script (doesn't exist yet -- `onnx` Python package is installed)
 2. Dump the ONNX graph to JSON + extract weights to flat binary
 3. Feed through `ModelRunner` -- should compile with zero new ops needed
 4. Wire into `landmark-worker-wgsl.js` with a config flag for model selection
-5. Benchmark through WGSL engine (expect ~5-8ms per hand, ~8-12ms batched)
+5. Add model selector dropdown to ball-toss and hand-viz demos
+6. Benchmark through WGSL engine (expect ~5-8ms per hand, ~8-12ms batched)
 
 **The batch dimension is the real win.** Currently our pipeline runs two separate landmark inference calls (one per hand). hand_landmark_10mb's `[N, 3, 224, 224]` input lets us do both in a single GPU dispatch chain. This alone could cut landmark latency nearly in half for two-hand tracking.
 

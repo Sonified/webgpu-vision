@@ -20,8 +20,8 @@ try {
   const device = await adapter.requestDevice();
   log('WebGPU ready');
 
-  const graph = await (await fetch('../models/palm_detection_lite.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/palm_detection_lite.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/palm_detection_lite/palm_detection_lite.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/palm_detection_lite/palm_detection_lite.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
 
   const W = {};
@@ -97,7 +97,7 @@ try {
   try {
     const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
     ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
-    const sess = await ort.InferenceSession.create('../models/palm_detection_lite.onnx', { executionProviders: ['wasm'] });
+    const sess = await ort.InferenceSession.create('../models/hand/palm_detection_lite/source/palm_detection_lite.onnx', { executionProviders: ['wasm'] });
     const tensor = new ort.Tensor('float32', new Float32Array(192*192*3).fill(0.5), [1, 192, 192, 3]);
     const firstInput = sess.inputNames[0];
     for (let i = 0; i < 5; i++) await sess.run({ [firstInput]: tensor });

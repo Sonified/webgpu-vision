@@ -9,8 +9,8 @@ import { weightedNMS } from './face-nms.js';
 applyLogGatesFromUrl();
 
 const FACE_SIZE = 128;
-const MODEL_JSON_URL = '../models/face_detector.json';
-const MODEL_BIN_URL = '../models/face_detector.bin';
+const MODEL_JSON_URL = '../models/face/face_detector/face_detector.json';
+const MODEL_BIN_URL = '../models/face/face_detector/face_detector.bin';
 
 let runner = null;
 let anchors = null;

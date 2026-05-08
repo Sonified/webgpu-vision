@@ -33,8 +33,8 @@ try {
 
   // Load model
   log('Loading hand_landmark_full...');
-  const graph = await (await fetch('../models/hand_landmark_full.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/hand_landmark_full.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
 
   // Upload weights

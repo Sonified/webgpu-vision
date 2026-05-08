@@ -21,8 +21,8 @@ try {
   log('WebGPU ready');
 
   // Load model
-  const graph = await (await fetch('../models/hand_landmark_full.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/hand_landmark_full.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
 
   // Upload weights
@@ -116,7 +116,7 @@ try {
   try {
     const ort = await import('../vendor/onnxruntime-web/ort.webgpu.min.mjs');
     ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
-    const sess = await ort.InferenceSession.create('../models/hand_landmark_full.onnx', { executionProviders: ['wasm'] });
+    const sess = await ort.InferenceSession.create('../models/hand/hand_landmark_4mb/source/hand_landmark_full.onnx', { executionProviders: ['wasm'] });
     const tensor = new ort.Tensor('float32', new Float32Array(H*Wi*3).fill(0.5), [1, H, Wi, 3]);
     for (let i = 0; i < 5; i++) await sess.run({ input_1: tensor });
     const ot0 = performance.now();

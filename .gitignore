@@ -8,15 +8,29 @@ ar/
 .session-timer
 RESEARCH-*.md
 
-# RTMPose exploration models (not used by engine, ~232MB)
-models/rtmpose*
-models/20230831/
+# Archived/rejected model evaluations (~180MB)
+models/_archive/
 
-# Sparse model binary (10.1MB, downloaded on demand)
-models/hand_landmark_sparse*
+# 10mb hand landmark ONNX (not yet converted to WGSL .json/.bin)
+models/hand/hand_landmark_10mb/source/
 
 # ORT vendor copies (used by test-rtmpose.html, not needed in engine)
 vendor/ort-wasm-simd-threaded.jsep.*
 
 # QR codes for mobile testing
 qr-*.png
+
+# ── CDN: models.now.audio ──────────────────────────────────────────
+# Cloudflare R2 bucket: webgpu-vision
+# Custom domain: models.now.audio (R2 DNS record in now.audio zone)
+# CORS: allow all origins GET
+# COEP/COOP headers: set via Cloudflare Transform Rule
+#
+# Upload (MUST use --remote, without it wrangler silently writes to local emulator):
+#   cd models/
+#   npx wrangler r2 object put webgpu-vision/<path> --file <local-path> \
+#     --content-type application/octet-stream --remote
+#
+# model-urls.js auto-switches: localhost -> /models/, production -> models.now.audio
+# Local models/ dir structure mirrors R2 paths exactly.
+.wrangler/

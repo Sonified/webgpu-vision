@@ -179,7 +179,6 @@ const MAX_MISSES = 3;
 export class HandTracker {
   constructor() {
     this.palmWorker = new PalmWorker(new URL('./palm-worker.js', import.meta.url), 'ort');
-    this.palmWorkerWGSL = new PalmWorker(new URL('./palm-worker-wgsl.js', import.meta.url), 'wgsl');
     this.landmarkWorkers = [new LandmarkWorker(), new LandmarkWorker()];
     // Each slot carries the minimum state needed for identity tracking:
     //   - rect: ROI for next inference (derived from last-accepted landmarks)
@@ -205,12 +204,8 @@ export class HandTracker {
   }
 
   async init(onStatus) {
-    onStatus?.('Loading palm detection worker (ORT)...');
+    onStatus?.('Loading palm detection worker...');
     await this.palmWorker.init(PALM_MODEL_URL);
-
-    onStatus?.('Loading palm detection worker (WGSL shadow)...');
-    await this.palmWorkerWGSL.init();
-    this._wgslShadowBusy = false;
 
     onStatus?.('Loading landmark worker 0...');
     await this.landmarkWorkers[0].init(LANDMARK_MODEL_URL);
@@ -321,7 +316,7 @@ export class HandTracker {
             if (excl * excl > closeThreshSq) closeThreshSq = excl * excl;
           }
           if (n.minDistSqToActive < closeThreshSq) {
-            console.log(`[palm-reject] det at (${n.point.x.toFixed(0)},${n.point.y.toFixed(0)}) too close: dist=${Math.sqrt(n.minDistSqToActive).toFixed(0)}px < thresh=${Math.sqrt(closeThreshSq).toFixed(0)}px`);
+            log('detection', `[palm-reject] det at (${n.point.x.toFixed(0)},${n.point.y.toFixed(0)}) too close: dist=${Math.sqrt(n.minDistSqToActive).toFixed(0)}px < thresh=${Math.sqrt(closeThreshSq).toFixed(0)}px`);
             continue;
           }
 
@@ -359,24 +354,13 @@ export class HandTracker {
         && distSq(s0.centroid, s1.centroid) < 80 * 80;
       if ((hasEmptySlots || slotsOverlapping) && !this.palmDetecting) {
         this.palmDetecting = true;
-        this._palmAttempts = (this._palmAttempts || 0) + 1;
-        const attemptNum = this._palmAttempts;
-        const t0 = performance.now();
-        const frameOrt = new VideoFrame(video);
-        const frameWgsl = new VideoFrame(video);
+        const frame = new VideoFrame(video);
 
-        const ortP = this.palmWorker.detect(frameOrt);
-        const wgslP = this.palmWorkerWGSL.detect(frameWgsl);
-
-        Promise.all([ortP, wgslP]).then(([ortResult, wgslResult]) => {
+        this.palmWorker.detect(frame).then((result) => {
           this.palmDetecting = false;
-          const ms = (performance.now() - t0).toFixed(1);
-          const empty = this.slots.filter(s => !s.active).length;
-          const fmtDets = (dets) => dets.map(d => `(${(d.cx*100).toFixed(0)},${(d.cy*100).toFixed(0)} s=${d.score.toFixed(2)})`).join(' ');
-          console.log(`[palm-race #${attemptNum}] ORT: ${ortResult.detections.length} det [${fmtDets(ortResult.detections)}] | WGSL: ${wgslResult.detections.length} det [${fmtDets(wgslResult.detections)}] | ${ms}ms, ${empty} empty`);
-          if (ortResult.previewRGBA) this._lastPreview = ortResult.previewRGBA;
-          if (ortResult.detections.length > 0) {
-            this.pendingDetections = ortResult;
+          if (result.previewRGBA) this._lastPreview = result.previewRGBA;
+          if (result.detections.length > 0) {
+            this.pendingDetections = result;
           }
         }).catch(() => { this.palmDetecting = false; });
       }

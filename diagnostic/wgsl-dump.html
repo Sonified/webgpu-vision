@@ -92,8 +92,8 @@ async function run() {
   addLog('WebGPU ready');
 
   // Load model
-  const graph = await (await fetch('../models/palm_detection_lite.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/palm_detection_lite.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/palm_detection_lite/palm_detection_lite.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/palm_detection_lite/palm_detection_lite.bin')).arrayBuffer());
 
   // Create weight buffers
   const W = {};

@@ -31,8 +31,8 @@ try {
   log('WebGPU ready\n');
 
   log('Loading face_landmarks_detector...');
-  const graph = await (await fetch('../models/face_landmarks_detector.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/face_landmarks_detector.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/face/face_landmarks/face_landmarks_detector.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/face/face_landmarks/face_landmarks_detector.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
 
   const W = {};

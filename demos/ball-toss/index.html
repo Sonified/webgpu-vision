@@ -258,6 +258,7 @@
     { id: 'fps', label: 'Frame Rate' },
     { id: 'heartbeat', label: 'Heartbeat' },
     { id: 'tracking', label: 'Tracking' },
+    { id: 'detection', label: 'Detection' },
   ];
 
   const KEY = 'wgv_log_gates';
@@ -1722,7 +1723,10 @@ function initMediaPipeBackend(numHands) {
   handWorker.onmessage = (e) => {
     if (e.data.type === 'init') { handReady = true; updateStatus(); }
     if (e.data.type === 'result') {
-      if (mpHandT0) _bench.handLatencies.push(performance.now() - mpHandT0);
+      if (mpHandT0) {
+        _bench.handLatencies.push(performance.now() - mpHandT0);
+        _bench.handCounts.push(e.data.hands ? e.data.hands.filter(Boolean).length : 0);
+      }
       handleHandResult(e.data.hands);
       handIdle = true;
     }
@@ -1844,6 +1848,7 @@ let gpuFaceBusy = false;
 // Benchmark tracking
 const _bench = {
   handLatencies: [], faceLatencies: [], handCount: 0, faceCount: 0,
+  handCounts: [],
   lastReport: 0, interval: 5000,
   report(now) {
     if (now - this.lastReport < this.interval) return;
@@ -1854,7 +1859,11 @@ const _bench = {
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
-      log('bench', `[BENCH] ${backendTag} Hand: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      const hc = this.handCounts.length > 0
+        ? this.handCounts.reduce((a,b) => a+b,0) / this.handCounts.length
+        : 0;
+      const handsTag = hc === 0 ? '0h' : hc >= 1.95 ? '2h' : hc <= 0.05 ? '0h' : `${hc.toFixed(1)}h`;
+      log('bench', `[BENCH] ${backendTag} Hand (${handsTag}): ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);
@@ -1865,6 +1874,7 @@ const _bench = {
       log('bench', `[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     this.handLatencies = [];
+    this.handCounts = [];
     this.faceLatencies = [];
   }
 };
@@ -1953,6 +1963,7 @@ function processWebGPUHands() {
   gpuHandTracker.processFrame(video).then(result => {
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
+    _bench.handCounts.push(result.hands ? result.hands.filter(Boolean).length : 0);
     if (result.palmPreview) drawPalmPreview(result.palmPreview);
     // WebGPU Vision pipeline returns a fixed 2-element `hands` array in
     // stable slot order (centroid-based identity tracking). Pass `stable:true`

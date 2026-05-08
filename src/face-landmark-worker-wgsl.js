@@ -9,8 +9,8 @@ applyLogGatesFromUrl();
 const S = 256; // face landmark model input size
 const NUM_LANDMARKS = 478;
 const LANDMARK_FLOATS = NUM_LANDMARKS * 3; // 1434
-const MODEL_JSON_URL = '../models/face_landmarks_detector.json';
-const MODEL_BIN_URL = '../models/face_landmarks_detector.bin';
+const MODEL_JSON_URL = '../models/face/face_landmarks/face_landmarks_detector.json';
+const MODEL_BIN_URL = '../models/face/face_landmarks/face_landmarks_detector.bin';
 
 let runner = null;
 let device = null;

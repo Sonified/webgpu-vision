@@ -7,8 +7,8 @@ import { ModelRunner } from '../engine/model-runner.js';
 applyLogGatesFromUrl();
 
 const S = 224; // landmark model input size
-const MODEL_JSON_URL = '../models/hand_landmark_full.json';
-const MODEL_BIN_URL = '../models/hand_landmark_full.bin';
+const MODEL_JSON_URL = '../models/hand/hand_landmark_4mb/hand_landmark_full.json';
+const MODEL_BIN_URL = '../models/hand/hand_landmark_4mb/hand_landmark_full.bin';
 
 let runner = null;
 let device = null;
