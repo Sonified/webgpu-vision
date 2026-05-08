@@ -412,6 +412,9 @@ export class ModelRunner {
         for (const d of shape) floats *= d;
         const outBuf = getOrAlloc(out, shape);
 
+        const bufA = tensors[inA] || this.W[inA];
+        const bufB = tensors[inB] || this.W[inB];
+
         const params = new Uint32Array([floats, 0]); // mode 0 = plain add
         const pb = this._getUniformBuf(params.byteLength);
         device.queue.writeBuffer(pb, 0, params);
@@ -420,8 +423,8 @@ export class ModelRunner {
           layout: this.P.add.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: pb } },
-            { binding: 1, resource: { buffer: tensors[inA] } },
-            { binding: 2, resource: { buffer: tensors[inB] } },
+            { binding: 1, resource: { buffer: bufA } },
+            { binding: 2, resource: { buffer: bufB } },
             { binding: 3, resource: { buffer: outBuf } },
           ],
         }), Math.ceil(floats / 256));
@@ -601,6 +604,62 @@ export class ModelRunner {
             { binding: 4, resource: { buffer: outBuf } },
           ],
         }), Math.ceil(N / 64));
+        continue;
+      }
+
+      if (op === 'MatMul') {
+        const wName = inp[1];
+        const wShape = w[wName].shape;
+        const K = wShape[0], N = wShape[1];
+
+        let hasSigmoid = 0;
+        if (i + 1 < g.length && g[i + 1].op === 'Sigmoid' && g[i + 1].inputs[0] === out) {
+          hasSigmoid = 1;
+          shapes[g[i + 1].outputs[0]] = [1, N];
+          i++;
+        }
+
+        shapes[out] = [1, N];
+        const outBuf = getOrAlloc(out, [1, N]);
+        if (hasSigmoid && g[i]) tensors[g[i].outputs[0]] = outBuf;
+
+        const params = new Uint32Array([1, K, N, 0, hasSigmoid]);
+        const pb = this._getUniformBuf(params.byteLength);
+        device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `matmul_${K}x${N}`;
+        dispatch(enc, this.P.gemm, device.createBindGroup({
+          layout: this.P.gemm.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: this.W[wName] } },
+            { binding: 3, resource: { buffer: this.dummy } },
+            { binding: 4, resource: { buffer: outBuf } },
+          ],
+        }), Math.ceil(N / 64));
+        continue;
+      }
+
+      if (op === 'Round') {
+        const inShape = shapes[inp[0]];
+        shapes[out] = inShape;
+        let floats = 1;
+        for (const d of inShape) floats *= d;
+        const outBuf = getOrAlloc(out, inShape);
+
+        const params = new Uint32Array([floats, 5, 0, 0]);
+        const pb = this._getUniformBuf(params.byteLength);
+        device.queue.writeBuffer(pb, 0, params);
+        _dispatchLabel = `round_${floats}`;
+        dispatch(enc, this.P.add, device.createBindGroup({
+          layout: this.P.add.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: pb } },
+            { binding: 1, resource: { buffer: tensors[inp[0]] } },
+            { binding: 2, resource: { buffer: this.dummy } },
+            { binding: 3, resource: { buffer: outBuf } },
+          ],
+        }), Math.ceil(floats / 256));
         continue;
       }
 
