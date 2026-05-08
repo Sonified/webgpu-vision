@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head><title>WGSL vs ORT Layer Diff</title></head>
+<body>
+<pre id="log">Loading...</pre>
+<canvas id="preview" width="192" height="192" style="border:1px solid #333; display:none"></canvas>
+<script type="module">
+import { ModelRunner } from '../engine/model-runner.js';
+
+const PALM_SIZE = 192;
+const el = document.getElementById('log');
+const addLog = (msg) => { el.textContent += '\n' + msg; console.log(msg); };
+
+function compare(wgsl, ort, label) {
+  if (wgsl.length !== ort.length) {
+    return { match: false, reason: `size mismatch: wgsl=${wgsl.length} ort=${ort.length}` };
+  }
+  let maxAbs = 0, sumSq = 0, maxIdx = 0;
+  for (let i = 0; i < wgsl.length; i++) {
+    const d = Math.abs(wgsl[i] - ort[i]);
+    sumSq += d * d;
+    if (d > maxAbs) { maxAbs = d; maxIdx = i; }
+  }
+  const rmse = Math.sqrt(sumSq / wgsl.length);
+  return { match: maxAbs < 0.01, maxAbs, rmse, maxIdx, wgslAt: wgsl[maxIdx], ortAt: ort[maxIdx] };
+}
+
+async function run() {
+  const params = new URLSearchParams(location.search);
+  const imageStem = params.get('image') || 'hand_000';
+  const useOrtInput = params.get('exact') === '1';
+  const dumpDir = `dumps/${imageStem}`;
+  addLog(`=== WGSL vs ORT Layer Diff: ${imageStem} ===`);
+  addLog(`Mode: ${useOrtInput ? 'EXACT ORT input (no letterbox diff)' : 'Canvas letterbox (realistic)'}`);
+
+  // Load ORT manifest
+  const manifest = await (await fetch(`${dumpDir}/_manifest.json`)).json();
+  addLog(`ORT manifest: ${manifest.layers.length} layers`);
+
+  // Build ORT lookup: node index -> layer info
+  const ortByIdx = {};
+  for (const l of manifest.layers) ortByIdx[l.idx] = l;
+
+  let nchw;
+  if (useOrtInput) {
+    // Load the EXACT NCHW input that Python ORT used (eliminates letterbox differences)
+    nchw = new Float32Array(await (await fetch(`${dumpDir}/_input_nchw.bin`)).arrayBuffer());
+    addLog(`Loaded ORT reference NCHW input: ${nchw.length} floats`);
+  } else {
+    // Load test image and letterbox via canvas (shows realistic browser behavior)
+    const imagePath = params.get('imagePath') || `../images/test_images/hand_images/${imageStem}.png`;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = imagePath; });
+
+    const srcW = img.width, srcH = img.height;
+    const scale = PALM_SIZE / Math.max(srcW, srcH);
+    const dstW = Math.round(srcW * scale), dstH = Math.round(srcH * scale);
+    const offsetX = (PALM_SIZE - dstW) / 2, offsetY = (PALM_SIZE - dstH) / 2;
+    addLog(`Letterbox: ${srcW}x${srcH} -> ${dstW}x${dstH} offset=${offsetX},${offsetY}`);
+
+    const canvas = document.getElementById('preview');
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, PALM_SIZE, PALM_SIZE);
+    ctx.drawImage(img, offsetX, offsetY, dstW, dstH);
+    const imageData = ctx.getImageData(0, 0, PALM_SIZE, PALM_SIZE);
+
+    nchw = new Float32Array(3 * PALM_SIZE * PALM_SIZE);
+    const S = PALM_SIZE * PALM_SIZE;
+    for (let i = 0; i < S; i++) {
+      nchw[i]         = imageData.data[i * 4]     / 255;
+      nchw[S + i]     = imageData.data[i * 4 + 1] / 255;
+      nchw[2 * S + i] = imageData.data[i * 4 + 2] / 255;
+    }
+  }
+
+  // Compare input against ORT's node 0 (Transpose output = NCHW)
+  if (ortByIdx[0]) {
+    const ortInput = new Float32Array(await (await fetch(`${dumpDir}/${ortByIdx[0].bin}`)).arrayBuffer());
+    const cmp = compare(nchw, ortInput, 'input');
+    addLog(`[input] NCHW ${cmp.match ? 'MATCH' : 'DIVERGE'} maxAbs=${cmp.maxAbs?.toFixed(6)} rmse=${cmp.rmse?.toFixed(6)}`);
+    if (!cmp.match && !useOrtInput) {
+      addLog(`  (letterbox diff -- rerun with ?exact=1 to isolate op bugs from preprocessing)`);
+    }
+  }
+
+  // Init WebGPU
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) { addLog('ERROR: no WebGPU adapter'); return; }
+  const device = await adapter.requestDevice();
+  addLog('WebGPU ready');
+
+  // Load model
+  const graph = await (await fetch('../models/palm_detection_lite.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/palm_detection_lite.bin')).arrayBuffer());
+
+  // Create weight buffers
+  const W = {};
+  for (const [name, info] of Object.entries(graph.weights)) {
+    if (info.length === 0) continue;
+    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, allWeights.subarray(info.offset, info.offset + info.length));
+    W[name] = buf;
+  }
+  const allWeightsBuf = device.createBuffer({ size: allWeights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBuf, 0, allWeights);
+
+  // Input buffer
+  const BF = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+  const inputBuf = device.createBuffer({ size: nchw.byteLength, usage: BF });
+  device.queue.writeBuffer(inputBuf, 0, nchw);
+
+  // Pipelines
+  const mkP = async (name) => {
+    const code = await (await fetch(`../engine/${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P = {
+    conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
+    gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
+    add: await mkP('add'), pad_channels: await mkP('pad_channels'),
+    fused_block: await mkP('fused_block'), transpose_nhwc: await mkP('transpose_nhwc'),
+  };
+
+  // Run WGSL engine with dumpAll
+  const runner = new ModelRunner(device, P, W, allWeightsBuf);
+  addLog('Running WGSL inference (dumpAll)...');
+  const wgslTensors = await runner.run(graph, inputBuf, allWeights, false, true);
+  const wgslKeys = Object.keys(wgslTensors).map(Number).sort((a,b) => a-b);
+  addLog(`WGSL dumped ${wgslKeys.length} tensors`);
+
+  // Layer-by-layer comparison
+  addLog('\n--- LAYER-BY-LAYER COMPARISON ---');
+  let firstBad = null;
+  for (const idx of wgslKeys) {
+    const wt = wgslTensors[idx];
+    const ol = ortByIdx[idx];
+    if (!ol) {
+      addLog(`  [${idx}] ${wt.op}: WGSL-only (fused? no ORT ref)`);
+      continue;
+    }
+
+    // Load ORT reference
+    const ortData = new Float32Array(await (await fetch(`${dumpDir}/${ol.bin}`)).arrayBuffer());
+    const cmp = compare(wt.data, ortData, `node ${idx}`);
+
+    const tag = cmp.match ? 'OK' : 'DIVERGE';
+    const shapeStr = JSON.stringify(wt.shape);
+    const line = `  [${String(idx).padStart(3)}] ${wt.op.padEnd(12)} ${shapeStr.padEnd(22)} ${tag} maxAbs=${cmp.maxAbs?.toFixed(6) || '?'} rmse=${cmp.rmse?.toFixed(6) || '?'}`;
+
+    if (!cmp.match) {
+      addLog(line + ` idx=${cmp.maxIdx} wgsl=${cmp.wgslAt?.toFixed(4)} ort=${cmp.ortAt?.toFixed(4)}`);
+      if (!firstBad) {
+        firstBad = idx;
+        // Show more detail for first divergent layer
+        addLog(`    FIRST DIVERGENCE at node ${idx} (${wt.op})`);
+        addLog(`    wgsl first8: [${wt.data.slice(0,8).map(v=>v.toFixed(4))}]`);
+        addLog(`    ort  first8: [${ortData.slice(0,8).map(v=>v.toFixed(4))}]`);
+        addLog(`    wgsl range: [${Math.min(...wt.data.slice(0,1000)).toFixed(4)}, ${Math.max(...wt.data.slice(0,1000)).toFixed(4)}]`);
+        addLog(`    ort  range: [${ol.min.toFixed(4)}, ${ol.max.toFixed(4)}]`);
+      }
+    } else {
+      addLog(line);
+    }
+  }
+
+  if (firstBad === null) {
+    addLog('\n ALL LAYERS MATCH -- bug is in preprocessing (letterbox)');
+  } else {
+    addLog(`\n FIRST DIVERGENCE: node ${firstBad} (${wgslTensors[firstBad].op})`);
+  }
+
+  addLog('\ndone');
+  window.__diffDone = true;
+}
+
+run().catch(e => { addLog('ERROR: ' + e.message + '\n' + e.stack); console.error(e); window.__diffDone = 'error'; });
+</script>
+</body>
+</html>

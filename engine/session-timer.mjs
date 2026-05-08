@@ -18,6 +18,8 @@
 const BUDGET_MS = 60 * 60 * 1000; // 1 hour
 const DAY_ROLLOVER_HOUR = 5; // 5 AM local time
 const IEEE_REQUIRED_HOURS = 3;
+// Gate enabled when ~/.session-timer/gate-enabled exists. Remove file to disable.
+const GATE_ENABLED_FILE = 'gate-enabled';
 
 /** Get the "session day" date string (YYYY-MM-DD) using 5 AM rollover. */
 export function sessionDay(date) {
@@ -42,9 +44,11 @@ function dayBoundary(date) {
 /**
  * Check IEEE hours gate.
  * @param {string|null} ieeeJson - contents of ~/.ieee-hours (JSON string or null)
+ * @param {boolean} gateEnabled - whether the gate file exists (default true for backwards compat)
  * @returns {{ hours: number, met: boolean, needed: number }}
  */
-export function ieeeGate(ieeeJson) {
+export function ieeeGate(ieeeJson, gateEnabled = true) {
+  if (!gateEnabled) return { hours: 0, met: true, needed: 0 };
   const today = sessionDay(new Date());
   if (!ieeeJson || !ieeeJson.trim()) {
     return { hours: 0, met: false, needed: IEEE_REQUIRED_HOURS };
@@ -65,10 +69,10 @@ export function ieeeGate(ieeeJson) {
  * @param {string|null} ieeeJson - contents of ieee-hours
  * @param {number} pausedMs - accumulated paused milliseconds (default 0)
  * @param {string|null} pauseStartIso - if currently paused, when the pause began
+ * @param {boolean} gateEnabled - whether the gate file exists (default true for backwards compat)
  */
-export function sessionStatus(startIso, ieeeJson, pausedMs = 0, pauseStartIso = null) {
-  // Check IEEE gate first
-  const ieee = ieeeGate(ieeeJson);
+export function sessionStatus(startIso, ieeeJson, pausedMs = 0, pauseStartIso = null, gateEnabled = true) {
+  const ieee = ieeeGate(ieeeJson, gateEnabled);
 
   if (!startIso || !startIso.trim()) return null;
   const start = new Date(startIso.trim());

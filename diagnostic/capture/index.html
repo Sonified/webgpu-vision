@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hand Capture -- Test Image Generator</title>
+<style>
+  body { background: #111; color: #eee; font-family: system-ui, sans-serif; margin: 20px; }
+  h1 { font-size: 1.4rem; margin-bottom: 8px; }
+  .info { color: #888; margin-bottom: 16px; }
+  #controls { margin-bottom: 12px; display: flex; gap: 12px; align-items: center; }
+  button { padding: 10px 20px; font-size: 1rem; border: none; border-radius: 6px; cursor: pointer; }
+  #start-btn { background: #4caf50; color: #fff; }
+  #start-btn.recording { background: #f44336; }
+  #stop-btn { background: #666; color: #fff; }
+  #download-btn { background: #2196f3; color: #fff; }
+  #download-btn:disabled { background: #444; cursor: default; }
+  #status { color: #4fc3f7; font-size: 0.9rem; }
+  #preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  #preview canvas { border: 1px solid #333; border-radius: 4px; }
+  video { border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; transform: scaleX(-1); }
+</style>
+</head>
+<body>
+
+<h1>Hand Capture</h1>
+<p class="info">Captures camera frames every 500ms. Move your hands around, then download all as a zip.</p>
+
+<video id="cam" autoplay playsinline muted width="480" height="360"></video>
+
+<div id="controls">
+  <button id="start-btn" onclick="toggleCapture()">Start Capture</button>
+  <button id="download-btn" disabled onclick="downloadAll()">Download All (0)</button>
+  <span id="status"></span>
+</div>
+
+<div id="preview"></div>
+
+<script>
+const cam = document.getElementById('cam');
+const startBtn = document.getElementById('start-btn');
+const downloadBtn = document.getElementById('download-btn');
+const status = document.getElementById('status');
+const preview = document.getElementById('preview');
+
+let stream = null;
+let capturing = false;
+let intervalId = null;
+let frames = []; // { blob, filename }
+
+async function initCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  cam.srcObject = stream;
+  await cam.play();
+  status.textContent = 'Camera ready. Hit Start.';
+}
+
+function captureFrame() {
+  const canvas = document.createElement('canvas');
+  canvas.width = cam.videoWidth;
+  canvas.height = cam.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(cam, 0, 0);
+
+  const idx = String(frames.length).padStart(3, '0');
+  const filename = `hand_${idx}.png`;
+
+  canvas.toBlob(blob => {
+    frames.push({ blob, filename });
+    downloadBtn.textContent = `Download All (${frames.length})`;
+    downloadBtn.disabled = false;
+    status.textContent = `Captured ${frames.length} frames`;
+
+    // Show small preview
+    const thumb = document.createElement('canvas');
+    thumb.width = 120;
+    thumb.height = 90;
+    thumb.title = filename;
+    const tctx = thumb.getContext('2d');
+    tctx.drawImage(canvas, 0, 0, 120, 90);
+    preview.appendChild(thumb);
+  }, 'image/png');
+}
+
+function toggleCapture() {
+  if (capturing) {
+    clearInterval(intervalId);
+    capturing = false;
+    startBtn.textContent = 'Start Capture';
+    startBtn.classList.remove('recording');
+    status.textContent = `Stopped. ${frames.length} frames captured.`;
+  } else {
+    capturing = true;
+    startBtn.textContent = 'Stop Capture';
+    startBtn.classList.add('recording');
+    captureFrame();
+    intervalId = setInterval(captureFrame, 500);
+  }
+}
+
+async function downloadAll() {
+  if (frames.length === 0) return;
+
+  // If only one frame, just download directly
+  if (frames.length === 1) {
+    const url = URL.createObjectURL(frames[0].blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = frames[0].filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  status.textContent = 'Zipping...';
+
+  // Simple zip using JSZip-free approach: download as individual files in a burst
+  // Or use a tiny inline zip builder
+  // For simplicity, let's offer both: zip if available, else burst download
+
+  // Attempt zip with a minimal implementation
+  try {
+    const zip = await buildZip(frames);
+    const url = URL.createObjectURL(zip);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hand_captures_${new Date().toISOString().slice(0,19).replace(/[T:]/g, '-')}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    status.textContent = `Downloaded ${frames.length} frames as zip.`;
+  } catch (e) {
+    // Fallback: download individually
+    status.textContent = `Zip failed, downloading ${frames.length} files individually...`;
+    for (const f of frames) {
+      const url = URL.createObjectURL(f.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      await new Promise(r => setTimeout(r, 100));
+    }
+    status.textContent = `Downloaded ${frames.length} files.`;
+  }
+}
+
+// Minimal zip builder -- no dependencies
+// ZIP format: local file headers + data + central directory + end record
+async function buildZip(files) {
+  const entries = [];
+  let offset = 0;
+
+  for (const f of files) {
+    const data = new Uint8Array(await f.blob.arrayBuffer());
+    const nameBytes = new TextEncoder().encode(f.filename);
+
+    // Local file header (30 + name length)
+    const header = new ArrayBuffer(30 + nameBytes.length);
+    const hv = new DataView(header);
+    hv.setUint32(0, 0x04034b50, true);  // signature
+    hv.setUint16(4, 20, true);           // version needed
+    hv.setUint16(6, 0, true);            // flags
+    hv.setUint16(8, 0, true);            // compression (store)
+    hv.setUint16(10, 0, true);           // mod time
+    hv.setUint16(12, 0, true);           // mod date
+    hv.setUint32(14, 0, true);           // crc32 (skip for simplicity)
+    hv.setUint32(18, data.length, true); // compressed size
+    hv.setUint32(22, data.length, true); // uncompressed size
+    hv.setUint16(26, nameBytes.length, true);
+    hv.setUint16(28, 0, true);           // extra field length
+    new Uint8Array(header, 30).set(nameBytes);
+
+    entries.push({ header: new Uint8Array(header), data, nameBytes, offset });
+    offset += header.byteLength + data.length;
+  }
+
+  // Central directory
+  const cdParts = [];
+  let cdSize = 0;
+  for (const e of entries) {
+    const cd = new ArrayBuffer(46 + e.nameBytes.length);
+    const cv = new DataView(cd);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0, true);
+    cv.setUint32(16, 0, true);
+    cv.setUint32(20, e.data.length, true);
+    cv.setUint32(24, e.data.length, true);
+    cv.setUint16(28, e.nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, e.offset, true);
+    new Uint8Array(cd, 46).set(e.nameBytes);
+    cdParts.push(new Uint8Array(cd));
+    cdSize += cd.byteLength;
+  }
+
+  // End of central directory
+  const eocd = new ArrayBuffer(22);
+  const ev = new DataView(eocd);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  // Concatenate everything
+  const parts = [];
+  for (const e of entries) { parts.push(e.header, e.data); }
+  for (const cd of cdParts) { parts.push(cd); }
+  parts.push(new Uint8Array(eocd));
+
+  const totalSize = parts.reduce((s, p) => s + p.length, 0);
+  const result = new Uint8Array(totalSize);
+  let pos = 0;
+  for (const p of parts) { result.set(p, pos); pos += p.length; }
+
+  return new Blob([result], { type: 'application/zip' });
+}
+
+initCamera().catch(e => { status.textContent = 'Camera error: ' + e.message; });
+</script>
+</body>
+</html>

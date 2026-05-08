@@ -2,5 +2,6 @@
   "liveServer.settings.headers": {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Embedder-Policy": "require-corp"
-  }
+  },
+  "liveServer.settings.port": 5501
 }
