@@ -1,0 +1,3315 @@
+{
+  "model": "hand_landmark_sparse_f16",
+  "input": {
+    "name": "input",
+    "shape": [
+      1,
+      3,
+      224,
+      224
+    ]
+  },
+  "outputs": [
+    {
+      "name": "xyz_x21",
+      "shape": [
+        1,
+        63
+      ]
+    },
+    {
+      "name": "hand_score",
+      "shape": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "lefthand_0_or_righthand_1",
+      "shape": [
+        1,
+        1
+      ]
+    }
+  ],
+  "weight_buffer": {
+    "total_floats": 2643045,
+    "total_bytes": 5286090,
+    "format": "f16"
+  },
+  "weights": {
+    "Conv2D/filter:0": {
+      "shape": [
+        24,
+        3,
+        3,
+        3
+      ],
+      "offset": 0,
+      "length": 648,
+      "byte_offset": 0,
+      "byte_size": 1296
+    },
+    "Add/y:0": {
+      "shape": [
+        24
+      ],
+      "offset": 648,
+      "length": 24,
+      "byte_offset": 1296,
+      "byte_size": 48
+    },
+    "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80": {
+      "shape": [],
+      "offset": 672,
+      "length": 1,
+      "byte_offset": 1344,
+      "byte_size": 2
+    },
+    "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220": {
+      "shape": [],
+      "offset": 673,
+      "length": 1,
+      "byte_offset": 1346,
+      "byte_size": 2
+    },
+    "const_fold_opt__299": {
+      "shape": [
+        24,
+        1,
+        3,
+        3
+      ],
+      "offset": 674,
+      "length": 216,
+      "byte_offset": 1348,
+      "byte_size": 432
+    },
+    "Add_1/y:0": {
+      "shape": [
+        24
+      ],
+      "offset": 890,
+      "length": 24,
+      "byte_offset": 1780,
+      "byte_size": 48
+    },
+    "Conv2D_1/filter:0": {
+      "shape": [
+        16,
+        24,
+        1,
+        1
+      ],
+      "offset": 914,
+      "length": 384,
+      "byte_offset": 1828,
+      "byte_size": 768
+    },
+    "model_1/model/batch_normalization_2/FusedBatchNormV3_model_1/model/conv2d_1/Conv2D1/y:0": {
+      "shape": [
+        16
+      ],
+      "offset": 1298,
+      "length": 16,
+      "byte_offset": 2596,
+      "byte_size": 32
+    },
+    "Conv2D_2/filter:0": {
+      "shape": [
+        64,
+        16,
+        1,
+        1
+      ],
+      "offset": 1314,
+      "length": 1024,
+      "byte_offset": 2628,
+      "byte_size": 2048
+    },
+    "Add_2/y:0": {
+      "shape": [
+        64
+      ],
+      "offset": 2338,
+      "length": 64,
+      "byte_offset": 4676,
+      "byte_size": 128
+    },
+    "const_fold_opt__301": {
+      "shape": [
+        64,
+        1,
+        3,
+        3
+      ],
+      "offset": 2402,
+      "length": 576,
+      "byte_offset": 4804,
+      "byte_size": 1152
+    },
+    "Add_3/y:0": {
+      "shape": [
+        64
+      ],
+      "offset": 2978,
+      "length": 64,
+      "byte_offset": 5956,
+      "byte_size": 128
+    },
+    "Conv2D_3/filter:0": {
+      "shape": [
+        24,
+        64,
+        1,
+        1
+      ],
+      "offset": 3042,
+      "length": 1536,
+      "byte_offset": 6084,
+      "byte_size": 3072
+    },
+    "model_1/model/batch_normalization_5/FusedBatchNormV3_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d_3/Conv2D1/y:0": {
+      "shape": [
+        24
+      ],
+      "offset": 4578,
+      "length": 24,
+      "byte_offset": 9156,
+      "byte_size": 48
+    },
+    "Conv2D_4/filter:0": {
+      "shape": [
+        144,
+        24,
+        1,
+        1
+      ],
+      "offset": 4602,
+      "length": 3456,
+      "byte_offset": 9204,
+      "byte_size": 6912
+    },
+    "Add_4/y:0": {
+      "shape": [
+        144
+      ],
+      "offset": 8058,
+      "length": 144,
+      "byte_offset": 16116,
+      "byte_size": 288
+    },
+    "const_fold_opt__298": {
+      "shape": [
+        144,
+        1,
+        3,
+        3
+      ],
+      "offset": 8202,
+      "length": 1296,
+      "byte_offset": 16404,
+      "byte_size": 2592
+    },
+    "Add_5/y:0": {
+      "shape": [
+        144
+      ],
+      "offset": 9498,
+      "length": 144,
+      "byte_offset": 18996,
+      "byte_size": 288
+    },
+    "Conv2D_5/filter:0": {
+      "shape": [
+        24,
+        144,
+        1,
+        1
+      ],
+      "offset": 9642,
+      "length": 3456,
+      "byte_offset": 19284,
+      "byte_size": 6912
+    },
+    "model_1/model/batch_normalization_8/FusedBatchNormV3_model_1/model/conv2d_5/Conv2D1/y:0": {
+      "shape": [
+        24
+      ],
+      "offset": 13098,
+      "length": 24,
+      "byte_offset": 26196,
+      "byte_size": 48
+    },
+    "Conv2D_6/filter:0": {
+      "shape": [
+        144,
+        24,
+        1,
+        1
+      ],
+      "offset": 13122,
+      "length": 3456,
+      "byte_offset": 26244,
+      "byte_size": 6912
+    },
+    "Add_6/y:0": {
+      "shape": [
+        144
+      ],
+      "offset": 16578,
+      "length": 144,
+      "byte_offset": 33156,
+      "byte_size": 288
+    },
+    "const_fold_opt__316": {
+      "shape": [
+        144,
+        1,
+        5,
+        5
+      ],
+      "offset": 16722,
+      "length": 3600,
+      "byte_offset": 33444,
+      "byte_size": 7200
+    },
+    "Add_7/y:0": {
+      "shape": [
+        144
+      ],
+      "offset": 20322,
+      "length": 144,
+      "byte_offset": 40644,
+      "byte_size": 288
+    },
+    "Conv2D_7/filter:0": {
+      "shape": [
+        40,
+        144,
+        1,
+        1
+      ],
+      "offset": 20466,
+      "length": 5760,
+      "byte_offset": 40932,
+      "byte_size": 11520
+    },
+    "model_1/model/batch_normalization_11/FusedBatchNormV3_model_1/model/conv2d_9/Conv2D_model_1/model/conv2d_7/Conv2D1/y:0": {
+      "shape": [
+        40
+      ],
+      "offset": 26226,
+      "length": 40,
+      "byte_offset": 52452,
+      "byte_size": 80
+    },
+    "Conv2D_8/filter:0": {
+      "shape": [
+        240,
+        40,
+        1,
+        1
+      ],
+      "offset": 26266,
+      "length": 9600,
+      "byte_offset": 52532,
+      "byte_size": 19200
+    },
+    "Add_8/y:0": {
+      "shape": [
+        240
+      ],
+      "offset": 35866,
+      "length": 240,
+      "byte_offset": 71732,
+      "byte_size": 480
+    },
+    "const_fold_opt__315": {
+      "shape": [
+        240,
+        1,
+        5,
+        5
+      ],
+      "offset": 36106,
+      "length": 6000,
+      "byte_offset": 72212,
+      "byte_size": 12000
+    },
+    "Add_9/y:0": {
+      "shape": [
+        240
+      ],
+      "offset": 42106,
+      "length": 240,
+      "byte_offset": 84212,
+      "byte_size": 480
+    },
+    "Conv2D_9/filter:0": {
+      "shape": [
+        40,
+        240,
+        1,
+        1
+      ],
+      "offset": 42346,
+      "length": 9600,
+      "byte_offset": 84692,
+      "byte_size": 19200
+    },
+    "model_1/model/batch_normalization_14/FusedBatchNormV3_model_1/model/conv2d_9/Conv2D1/y:0": {
+      "shape": [
+        40
+      ],
+      "offset": 51946,
+      "length": 40,
+      "byte_offset": 103892,
+      "byte_size": 80
+    },
+    "Conv2D_10/filter:0": {
+      "shape": [
+        240,
+        40,
+        1,
+        1
+      ],
+      "offset": 51986,
+      "length": 9600,
+      "byte_offset": 103972,
+      "byte_size": 19200
+    },
+    "Add_10/y:0": {
+      "shape": [
+        240
+      ],
+      "offset": 61586,
+      "length": 240,
+      "byte_offset": 123172,
+      "byte_size": 480
+    },
+    "const_fold_opt__313": {
+      "shape": [
+        240,
+        1,
+        3,
+        3
+      ],
+      "offset": 61826,
+      "length": 2160,
+      "byte_offset": 123652,
+      "byte_size": 4320
+    },
+    "Add_11/y:0": {
+      "shape": [
+        240
+      ],
+      "offset": 63986,
+      "length": 240,
+      "byte_offset": 127972,
+      "byte_size": 480
+    },
+    "Conv2D_11/filter:0": {
+      "shape": [
+        80,
+        240,
+        1,
+        1
+      ],
+      "offset": 64226,
+      "length": 19200,
+      "byte_offset": 128452,
+      "byte_size": 38400
+    },
+    "model_1/model/batch_normalization_17/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D_model_1/model/conv2d_11/Conv2D1/y:0": {
+      "shape": [
+        80
+      ],
+      "offset": 83426,
+      "length": 80,
+      "byte_offset": 166852,
+      "byte_size": 160
+    },
+    "Conv2D_12/filter:0": {
+      "shape": [
+        480,
+        80,
+        1,
+        1
+      ],
+      "offset": 83506,
+      "length": 38400,
+      "byte_offset": 167012,
+      "byte_size": 76800
+    },
+    "Add_12/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 121906,
+      "length": 480,
+      "byte_offset": 243812,
+      "byte_size": 960
+    },
+    "const_fold_opt__309": {
+      "shape": [
+        480,
+        1,
+        3,
+        3
+      ],
+      "offset": 122386,
+      "length": 4320,
+      "byte_offset": 244772,
+      "byte_size": 8640
+    },
+    "Add_13/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 126706,
+      "length": 480,
+      "byte_offset": 253412,
+      "byte_size": 960
+    },
+    "Conv2D_13/filter:0": {
+      "shape": [
+        80,
+        480,
+        1,
+        1
+      ],
+      "offset": 127186,
+      "length": 38400,
+      "byte_offset": 254372,
+      "byte_size": 76800
+    },
+    "model_1/model/batch_normalization_20/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D_model_1/model/conv2d_13/Conv2D1/y:0": {
+      "shape": [
+        80
+      ],
+      "offset": 165586,
+      "length": 80,
+      "byte_offset": 331172,
+      "byte_size": 160
+    },
+    "Conv2D_14/filter:0": {
+      "shape": [
+        480,
+        80,
+        1,
+        1
+      ],
+      "offset": 165666,
+      "length": 38400,
+      "byte_offset": 331332,
+      "byte_size": 76800
+    },
+    "Add_14/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 204066,
+      "length": 480,
+      "byte_offset": 408132,
+      "byte_size": 960
+    },
+    "const_fold_opt__312": {
+      "shape": [
+        480,
+        1,
+        3,
+        3
+      ],
+      "offset": 204546,
+      "length": 4320,
+      "byte_offset": 409092,
+      "byte_size": 8640
+    },
+    "Add_15/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 208866,
+      "length": 480,
+      "byte_offset": 417732,
+      "byte_size": 960
+    },
+    "Conv2D_15/filter:0": {
+      "shape": [
+        80,
+        480,
+        1,
+        1
+      ],
+      "offset": 209346,
+      "length": 38400,
+      "byte_offset": 418692,
+      "byte_size": 76800
+    },
+    "model_1/model/batch_normalization_23/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D1/y:0": {
+      "shape": [
+        80
+      ],
+      "offset": 247746,
+      "length": 80,
+      "byte_offset": 495492,
+      "byte_size": 160
+    },
+    "Conv2D_16/filter:0": {
+      "shape": [
+        480,
+        80,
+        1,
+        1
+      ],
+      "offset": 247826,
+      "length": 38400,
+      "byte_offset": 495652,
+      "byte_size": 76800
+    },
+    "Add_16/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 286226,
+      "length": 480,
+      "byte_offset": 572452,
+      "byte_size": 960
+    },
+    "const_fold_opt__308": {
+      "shape": [
+        480,
+        1,
+        5,
+        5
+      ],
+      "offset": 286706,
+      "length": 12000,
+      "byte_offset": 573412,
+      "byte_size": 24000
+    },
+    "Add_17/y:0": {
+      "shape": [
+        480
+      ],
+      "offset": 298706,
+      "length": 480,
+      "byte_offset": 597412,
+      "byte_size": 960
+    },
+    "Conv2D_17/filter:0": {
+      "shape": [
+        112,
+        480,
+        1,
+        1
+      ],
+      "offset": 299186,
+      "length": 53760,
+      "byte_offset": 598372,
+      "byte_size": 107520
+    },
+    "model_1/model/batch_normalization_26/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D_model_1/model/conv2d_17/Conv2D1/y:0": {
+      "shape": [
+        112
+      ],
+      "offset": 352946,
+      "length": 112,
+      "byte_offset": 705892,
+      "byte_size": 224
+    },
+    "Conv2D_18/filter:0": {
+      "shape": [
+        672,
+        112,
+        1,
+        1
+      ],
+      "offset": 353058,
+      "length": 75264,
+      "byte_offset": 706116,
+      "byte_size": 150528
+    },
+    "Add_18/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 428322,
+      "length": 672,
+      "byte_offset": 856644,
+      "byte_size": 1344
+    },
+    "const_fold_opt__307": {
+      "shape": [
+        672,
+        1,
+        5,
+        5
+      ],
+      "offset": 428994,
+      "length": 16800,
+      "byte_offset": 857988,
+      "byte_size": 33600
+    },
+    "Add_19/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 445794,
+      "length": 672,
+      "byte_offset": 891588,
+      "byte_size": 1344
+    },
+    "Conv2D_19/filter:0": {
+      "shape": [
+        112,
+        672,
+        1,
+        1
+      ],
+      "offset": 446466,
+      "length": 75264,
+      "byte_offset": 892932,
+      "byte_size": 150528
+    },
+    "model_1/model/batch_normalization_29/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D_model_1/model/conv2d_19/Conv2D1/y:0": {
+      "shape": [
+        112
+      ],
+      "offset": 521730,
+      "length": 112,
+      "byte_offset": 1043460,
+      "byte_size": 224
+    },
+    "Conv2D_20/filter:0": {
+      "shape": [
+        672,
+        112,
+        1,
+        1
+      ],
+      "offset": 521842,
+      "length": 75264,
+      "byte_offset": 1043684,
+      "byte_size": 150528
+    },
+    "Add_20/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 597106,
+      "length": 672,
+      "byte_offset": 1194212,
+      "byte_size": 1344
+    },
+    "const_fold_opt__304": {
+      "shape": [
+        672,
+        1,
+        5,
+        5
+      ],
+      "offset": 597778,
+      "length": 16800,
+      "byte_offset": 1195556,
+      "byte_size": 33600
+    },
+    "Add_21/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 614578,
+      "length": 672,
+      "byte_offset": 1229156,
+      "byte_size": 1344
+    },
+    "Conv2D_21/filter:0": {
+      "shape": [
+        112,
+        672,
+        1,
+        1
+      ],
+      "offset": 615250,
+      "length": 75264,
+      "byte_offset": 1230500,
+      "byte_size": 150528
+    },
+    "model_1/model/batch_normalization_32/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D1/y:0": {
+      "shape": [
+        112
+      ],
+      "offset": 690514,
+      "length": 112,
+      "byte_offset": 1381028,
+      "byte_size": 224
+    },
+    "Conv2D_22/filter:0": {
+      "shape": [
+        672,
+        112,
+        1,
+        1
+      ],
+      "offset": 690626,
+      "length": 75264,
+      "byte_offset": 1381252,
+      "byte_size": 150528
+    },
+    "Add_22/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 765890,
+      "length": 672,
+      "byte_offset": 1531780,
+      "byte_size": 1344
+    },
+    "const_fold_opt__300": {
+      "shape": [
+        672,
+        1,
+        5,
+        5
+      ],
+      "offset": 766562,
+      "length": 16800,
+      "byte_offset": 1533124,
+      "byte_size": 33600
+    },
+    "Add_23/y:0": {
+      "shape": [
+        672
+      ],
+      "offset": 783362,
+      "length": 672,
+      "byte_offset": 1566724,
+      "byte_size": 1344
+    },
+    "Conv2D_23/filter:0": {
+      "shape": [
+        192,
+        672,
+        1,
+        1
+      ],
+      "offset": 784034,
+      "length": 129024,
+      "byte_offset": 1568068,
+      "byte_size": 258048
+    },
+    "model_1/model/batch_normalization_35/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_23/Conv2D1/y:0": {
+      "shape": [
+        192
+      ],
+      "offset": 913058,
+      "length": 192,
+      "byte_offset": 1826116,
+      "byte_size": 384
+    },
+    "Conv2D_24/filter:0": {
+      "shape": [
+        1152,
+        192,
+        1,
+        1
+      ],
+      "offset": 913250,
+      "length": 221184,
+      "byte_offset": 1826500,
+      "byte_size": 442368
+    },
+    "Add_24/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 1134434,
+      "length": 1152,
+      "byte_offset": 2268868,
+      "byte_size": 2304
+    },
+    "const_fold_opt__297": {
+      "shape": [
+        1152,
+        1,
+        5,
+        5
+      ],
+      "offset": 1135586,
+      "length": 28800,
+      "byte_offset": 2271172,
+      "byte_size": 57600
+    },
+    "Add_25/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 1164386,
+      "length": 1152,
+      "byte_offset": 2328772,
+      "byte_size": 2304
+    },
+    "Conv2D_25/filter:0": {
+      "shape": [
+        192,
+        1152,
+        1,
+        1
+      ],
+      "offset": 1165538,
+      "length": 221184,
+      "byte_offset": 2331076,
+      "byte_size": 442368
+    },
+    "model_1/model/batch_normalization_38/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_25/Conv2D1/y:0": {
+      "shape": [
+        192
+      ],
+      "offset": 1386722,
+      "length": 192,
+      "byte_offset": 2773444,
+      "byte_size": 384
+    },
+    "Conv2D_26/filter:0": {
+      "shape": [
+        1152,
+        192,
+        1,
+        1
+      ],
+      "offset": 1386914,
+      "length": 221184,
+      "byte_offset": 2773828,
+      "byte_size": 442368
+    },
+    "Add_26/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 1608098,
+      "length": 1152,
+      "byte_offset": 3216196,
+      "byte_size": 2304
+    },
+    "const_fold_opt__311": {
+      "shape": [
+        1152,
+        1,
+        5,
+        5
+      ],
+      "offset": 1609250,
+      "length": 28800,
+      "byte_offset": 3218500,
+      "byte_size": 57600
+    },
+    "Add_27/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 1638050,
+      "length": 1152,
+      "byte_offset": 3276100,
+      "byte_size": 2304
+    },
+    "Conv2D_27/filter:0": {
+      "shape": [
+        192,
+        1152,
+        1,
+        1
+      ],
+      "offset": 1639202,
+      "length": 221184,
+      "byte_offset": 3278404,
+      "byte_size": 442368
+    },
+    "model_1/model/batch_normalization_41/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_27/Conv2D1/y:0": {
+      "shape": [
+        192
+      ],
+      "offset": 1860386,
+      "length": 192,
+      "byte_offset": 3720772,
+      "byte_size": 384
+    },
+    "Conv2D_28/filter:0": {
+      "shape": [
+        1152,
+        192,
+        1,
+        1
+      ],
+      "offset": 1860578,
+      "length": 221184,
+      "byte_offset": 3721156,
+      "byte_size": 442368
+    },
+    "Add_28/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 2081762,
+      "length": 1152,
+      "byte_offset": 4163524,
+      "byte_size": 2304
+    },
+    "const_fold_opt__305": {
+      "shape": [
+        1152,
+        1,
+        5,
+        5
+      ],
+      "offset": 2082914,
+      "length": 28800,
+      "byte_offset": 4165828,
+      "byte_size": 57600
+    },
+    "Add_29/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 2111714,
+      "length": 1152,
+      "byte_offset": 4223428,
+      "byte_size": 2304
+    },
+    "Conv2D_29/filter:0": {
+      "shape": [
+        192,
+        1152,
+        1,
+        1
+      ],
+      "offset": 2112866,
+      "length": 221184,
+      "byte_offset": 4225732,
+      "byte_size": 442368
+    },
+    "model_1/model/batch_normalization_44/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D1/y:0": {
+      "shape": [
+        192
+      ],
+      "offset": 2334050,
+      "length": 192,
+      "byte_offset": 4668100,
+      "byte_size": 384
+    },
+    "Conv2D_30/filter:0": {
+      "shape": [
+        1152,
+        192,
+        1,
+        1
+      ],
+      "offset": 2334242,
+      "length": 221184,
+      "byte_offset": 4668484,
+      "byte_size": 442368
+    },
+    "Add_30/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 2555426,
+      "length": 1152,
+      "byte_offset": 5110852,
+      "byte_size": 2304
+    },
+    "const_fold_opt__302": {
+      "shape": [
+        1152,
+        1,
+        3,
+        3
+      ],
+      "offset": 2556578,
+      "length": 10368,
+      "byte_offset": 5113156,
+      "byte_size": 20736
+    },
+    "Add_31/y:0": {
+      "shape": [
+        1152
+      ],
+      "offset": 2566946,
+      "length": 1152,
+      "byte_offset": 5133892,
+      "byte_size": 2304
+    },
+    "const_fold_opt__296": {
+      "shape": [
+        2
+      ],
+      "offset": 2568098,
+      "length": 2,
+      "byte_offset": 5136196,
+      "byte_size": 4
+    },
+    "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot/ReadVariableOp:0": {
+      "shape": [
+        1152,
+        1
+      ],
+      "offset": 2568100,
+      "length": 1152,
+      "byte_offset": 5136200,
+      "byte_size": 2304
+    },
+    "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/ReadVariableOp:0": {
+      "shape": [
+        1152,
+        1
+      ],
+      "offset": 2569252,
+      "length": 1152,
+      "byte_offset": 5138504,
+      "byte_size": 2304
+    },
+    "Identity_dense/Tensordot/ReadVariableOp:0": {
+      "shape": [
+        1152,
+        63
+      ],
+      "offset": 2570404,
+      "length": 72576,
+      "byte_offset": 5140808,
+      "byte_size": 145152
+    },
+    "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/BiasAdd/ReadVariableOp:0": {
+      "shape": [
+        1
+      ],
+      "offset": 2642980,
+      "length": 1,
+      "byte_offset": 5285960,
+      "byte_size": 2
+    },
+    "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/BiasAdd/ReadVariableOp:0": {
+      "shape": [
+        1
+      ],
+      "offset": 2642981,
+      "length": 1,
+      "byte_offset": 5285962,
+      "byte_size": 2
+    },
+    "Identity_dense/BiasAdd/ReadVariableOp:0": {
+      "shape": [
+        63
+      ],
+      "offset": 2642982,
+      "length": 63,
+      "byte_offset": 5285964,
+      "byte_size": 126
+    }
+  },
+  "graph": [
+    {
+      "op": "Conv",
+      "name": "Conv__227",
+      "inputs": [
+        "input",
+        "Conv2D/filter:0",
+        "Add/y:0"
+      ],
+      "outputs": [
+        "Conv__227:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          2,
+          2
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 1,
+        "auto_pad": "NOTSET",
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6/Relu6_model_1/model/batch_normalization/FusedBatchNormV3_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d/Conv2D",
+      "inputs": [
+        "Conv__227:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6/Relu6_model_1/model/batch_normalization/FusedBatchNormV3_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__228",
+      "inputs": [
+        "model_1/model/tf.nn.relu6/Relu6_model_1/model/batch_normalization/FusedBatchNormV3_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d/Conv2D:0",
+        "const_fold_opt__299",
+        "Add_1/y:0"
+      ],
+      "outputs": [
+        "Conv__228:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 24,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_1/Relu6_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D",
+      "inputs": [
+        "Conv__228:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_1/Relu6_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__229",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_1/Relu6_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D:0",
+        "Conv2D_1/filter:0",
+        "model_1/model/batch_normalization_2/FusedBatchNormV3_model_1/model/conv2d_1/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__229:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__230",
+      "inputs": [
+        "Conv__229:0",
+        "Conv2D_2/filter:0",
+        "Add_2/y:0"
+      ],
+      "outputs": [
+        "Conv__230:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_2/Relu6_model_1/model/batch_normalization_3/FusedBatchNormV3_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise_model_1/model/conv2d_2/Conv2D",
+      "inputs": [
+        "Conv__230:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_2/Relu6_model_1/model/batch_normalization_3/FusedBatchNormV3_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise_model_1/model/conv2d_2/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__231",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_2/Relu6_model_1/model/batch_normalization_3/FusedBatchNormV3_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise_model_1/model/conv2d_2/Conv2D:0",
+        "const_fold_opt__301",
+        "Add_3/y:0"
+      ],
+      "outputs": [
+        "Conv__231:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          2,
+          2
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 64,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_3/Relu6_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise",
+      "inputs": [
+        "Conv__231:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_3/Relu6_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__232",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_3/Relu6_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise:0",
+        "Conv2D_3/filter:0",
+        "model_1/model/batch_normalization_5/FusedBatchNormV3_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d_3/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__232:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__235",
+      "inputs": [
+        "Conv__232:0",
+        "Conv2D_4/filter:0",
+        "Add_4/y:0"
+      ],
+      "outputs": [
+        "Conv__235:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_4/Relu6_model_1/model/batch_normalization_6/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_4/Conv2D",
+      "inputs": [
+        "Conv__235:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_4/Relu6_model_1/model/batch_normalization_6/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_4/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__236",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_4/Relu6_model_1/model/batch_normalization_6/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_4/Conv2D:0",
+        "const_fold_opt__298",
+        "Add_5/y:0"
+      ],
+      "outputs": [
+        "Conv__236:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 144,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_5/Relu6_model_1/model/batch_normalization_7/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/depthwise_conv2d_2/depthwise",
+      "inputs": [
+        "Conv__236:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_5/Relu6_model_1/model/batch_normalization_7/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/depthwise_conv2d_2/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__237",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_5/Relu6_model_1/model/batch_normalization_7/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/depthwise_conv2d_2/depthwise:0",
+        "Conv2D_5/filter:0",
+        "model_1/model/batch_normalization_8/FusedBatchNormV3_model_1/model/conv2d_5/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__237:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add/AddV2",
+      "inputs": [
+        "Conv__237:0",
+        "Conv__232:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__238",
+      "inputs": [
+        "model_1/model/tf.__operators__.add/AddV2:0",
+        "Conv2D_6/filter:0",
+        "Add_6/y:0"
+      ],
+      "outputs": [
+        "Conv__238:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_6/Relu6_model_1/model/batch_normalization_9/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_6/Conv2D",
+      "inputs": [
+        "Conv__238:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_6/Relu6_model_1/model/batch_normalization_9/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_6/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__239",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_6/Relu6_model_1/model/batch_normalization_9/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_6/Conv2D:0",
+        "const_fold_opt__316",
+        "Add_7/y:0"
+      ],
+      "outputs": [
+        "Conv__239:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          2,
+          2
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 144,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_7/Relu6_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise",
+      "inputs": [
+        "Conv__239:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_7/Relu6_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__240",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_7/Relu6_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise:0",
+        "Conv2D_7/filter:0",
+        "model_1/model/batch_normalization_11/FusedBatchNormV3_model_1/model/conv2d_9/Conv2D_model_1/model/conv2d_7/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__240:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__243",
+      "inputs": [
+        "Conv__240:0",
+        "Conv2D_8/filter:0",
+        "Add_8/y:0"
+      ],
+      "outputs": [
+        "Conv__243:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_8/Relu6_model_1/model/batch_normalization_12/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_8/Conv2D",
+      "inputs": [
+        "Conv__243:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_8/Relu6_model_1/model/batch_normalization_12/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_8/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__244",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_8/Relu6_model_1/model/batch_normalization_12/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_8/Conv2D:0",
+        "const_fold_opt__315",
+        "Add_9/y:0"
+      ],
+      "outputs": [
+        "Conv__244:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 240,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_9/Relu6_model_1/model/batch_normalization_13/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/depthwise_conv2d_4/depthwise",
+      "inputs": [
+        "Conv__244:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_9/Relu6_model_1/model/batch_normalization_13/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/depthwise_conv2d_4/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__245",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_9/Relu6_model_1/model/batch_normalization_13/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/depthwise_conv2d_4/depthwise:0",
+        "Conv2D_9/filter:0",
+        "model_1/model/batch_normalization_14/FusedBatchNormV3_model_1/model/conv2d_9/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__245:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_1/AddV2",
+      "inputs": [
+        "Conv__245:0",
+        "Conv__240:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_1/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__246",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_1/AddV2:0",
+        "Conv2D_10/filter:0",
+        "Add_10/y:0"
+      ],
+      "outputs": [
+        "Conv__246:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D",
+      "inputs": [
+        "Conv__246:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__247",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D:0",
+        "const_fold_opt__313",
+        "Add_11/y:0"
+      ],
+      "outputs": [
+        "Conv__247:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          2,
+          2
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 240,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_11/Relu6_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise",
+      "inputs": [
+        "Conv__247:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_11/Relu6_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__248",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_11/Relu6_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise:0",
+        "Conv2D_11/filter:0",
+        "model_1/model/batch_normalization_17/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D_model_1/model/conv2d_11/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__248:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__251",
+      "inputs": [
+        "Conv__248:0",
+        "Conv2D_12/filter:0",
+        "Add_12/y:0"
+      ],
+      "outputs": [
+        "Conv__251:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_12/Relu6_model_1/model/batch_normalization_18/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_12/Conv2D",
+      "inputs": [
+        "Conv__251:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_12/Relu6_model_1/model/batch_normalization_18/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_12/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__252",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_12/Relu6_model_1/model/batch_normalization_18/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_12/Conv2D:0",
+        "const_fold_opt__309",
+        "Add_13/y:0"
+      ],
+      "outputs": [
+        "Conv__252:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 480,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_13/Relu6_model_1/model/batch_normalization_19/FusedBatchNormV3_model_1/model/depthwise_conv2d_6/depthwise_model_1/model/depthwise_conv2d_8/depthwise",
+      "inputs": [
+        "Conv__252:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_13/Relu6_model_1/model/batch_normalization_19/FusedBatchNormV3_model_1/model/depthwise_conv2d_6/depthwise_model_1/model/depthwise_conv2d_8/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__253",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_13/Relu6_model_1/model/batch_normalization_19/FusedBatchNormV3_model_1/model/depthwise_conv2d_6/depthwise_model_1/model/depthwise_conv2d_8/depthwise:0",
+        "Conv2D_13/filter:0",
+        "model_1/model/batch_normalization_20/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D_model_1/model/conv2d_13/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__253:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_2/AddV2",
+      "inputs": [
+        "Conv__253:0",
+        "Conv__248:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_2/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__256",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_2/AddV2:0",
+        "Conv2D_14/filter:0",
+        "Add_14/y:0"
+      ],
+      "outputs": [
+        "Conv__256:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_14/Relu6_model_1/model/batch_normalization_21/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_14/Conv2D",
+      "inputs": [
+        "Conv__256:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_14/Relu6_model_1/model/batch_normalization_21/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_14/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__257",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_14/Relu6_model_1/model/batch_normalization_21/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_14/Conv2D:0",
+        "const_fold_opt__312",
+        "Add_15/y:0"
+      ],
+      "outputs": [
+        "Conv__257:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 480,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_15/Relu6_model_1/model/batch_normalization_22/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/depthwise_conv2d_7/depthwise",
+      "inputs": [
+        "Conv__257:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_15/Relu6_model_1/model/batch_normalization_22/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/depthwise_conv2d_7/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__258",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_15/Relu6_model_1/model/batch_normalization_22/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/depthwise_conv2d_7/depthwise:0",
+        "Conv2D_15/filter:0",
+        "model_1/model/batch_normalization_23/FusedBatchNormV3_model_1/model/conv2d_15/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__258:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_3/AddV2",
+      "inputs": [
+        "Conv__258:0",
+        "model_1/model/tf.__operators__.add_2/AddV2:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_3/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__259",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_3/AddV2:0",
+        "Conv2D_16/filter:0",
+        "Add_16/y:0"
+      ],
+      "outputs": [
+        "Conv__259:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_16/Relu6_model_1/model/batch_normalization_24/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_16/Conv2D",
+      "inputs": [
+        "Conv__259:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_16/Relu6_model_1/model/batch_normalization_24/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_16/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__260",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_16/Relu6_model_1/model/batch_normalization_24/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_16/Conv2D:0",
+        "const_fold_opt__308",
+        "Add_17/y:0"
+      ],
+      "outputs": [
+        "Conv__260:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 480,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_17/Relu6_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise",
+      "inputs": [
+        "Conv__260:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_17/Relu6_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__261",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_17/Relu6_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise:0",
+        "Conv2D_17/filter:0",
+        "model_1/model/batch_normalization_26/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D_model_1/model/conv2d_17/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__261:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__264",
+      "inputs": [
+        "Conv__261:0",
+        "Conv2D_18/filter:0",
+        "Add_18/y:0"
+      ],
+      "outputs": [
+        "Conv__264:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_18/Relu6_model_1/model/batch_normalization_27/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_18/Conv2D",
+      "inputs": [
+        "Conv__264:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_18/Relu6_model_1/model/batch_normalization_27/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_18/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__265",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_18/Relu6_model_1/model/batch_normalization_27/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_18/Conv2D:0",
+        "const_fold_opt__307",
+        "Add_19/y:0"
+      ],
+      "outputs": [
+        "Conv__265:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 672,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_19/Relu6_model_1/model/batch_normalization_28/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/depthwise_conv2d_9/depthwise",
+      "inputs": [
+        "Conv__265:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_19/Relu6_model_1/model/batch_normalization_28/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/depthwise_conv2d_9/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__266",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_19/Relu6_model_1/model/batch_normalization_28/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/depthwise_conv2d_9/depthwise:0",
+        "Conv2D_19/filter:0",
+        "model_1/model/batch_normalization_29/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D_model_1/model/conv2d_19/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__266:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_4/AddV2",
+      "inputs": [
+        "Conv__266:0",
+        "Conv__261:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_4/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__269",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_4/AddV2:0",
+        "Conv2D_20/filter:0",
+        "Add_20/y:0"
+      ],
+      "outputs": [
+        "Conv__269:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_20/Relu6_model_1/model/batch_normalization_30/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_20/Conv2D",
+      "inputs": [
+        "Conv__269:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_20/Relu6_model_1/model/batch_normalization_30/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_20/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__270",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_20/Relu6_model_1/model/batch_normalization_30/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_20/Conv2D:0",
+        "const_fold_opt__304",
+        "Add_21/y:0"
+      ],
+      "outputs": [
+        "Conv__270:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 672,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_21/Relu6_model_1/model/batch_normalization_31/FusedBatchNormV3_model_1/model/depthwise_conv2d_10/depthwise_model_1/model/depthwise_conv2d_11/depthwise",
+      "inputs": [
+        "Conv__270:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_21/Relu6_model_1/model/batch_normalization_31/FusedBatchNormV3_model_1/model/depthwise_conv2d_10/depthwise_model_1/model/depthwise_conv2d_11/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__271",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_21/Relu6_model_1/model/batch_normalization_31/FusedBatchNormV3_model_1/model/depthwise_conv2d_10/depthwise_model_1/model/depthwise_conv2d_11/depthwise:0",
+        "Conv2D_21/filter:0",
+        "model_1/model/batch_normalization_32/FusedBatchNormV3_model_1/model/conv2d_21/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__271:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_5/AddV2",
+      "inputs": [
+        "Conv__271:0",
+        "model_1/model/tf.__operators__.add_4/AddV2:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_5/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__272",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_5/AddV2:0",
+        "Conv2D_22/filter:0",
+        "Add_22/y:0"
+      ],
+      "outputs": [
+        "Conv__272:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_22/Relu6_model_1/model/batch_normalization_33/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_22/Conv2D",
+      "inputs": [
+        "Conv__272:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_22/Relu6_model_1/model/batch_normalization_33/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_22/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__273",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_22/Relu6_model_1/model/batch_normalization_33/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_22/Conv2D:0",
+        "const_fold_opt__300",
+        "Add_23/y:0"
+      ],
+      "outputs": [
+        "Conv__273:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          2,
+          2
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 672,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_23/Relu6_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise",
+      "inputs": [
+        "Conv__273:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_23/Relu6_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__274",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_23/Relu6_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise:0",
+        "Conv2D_23/filter:0",
+        "model_1/model/batch_normalization_35/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_23/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__274:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__277",
+      "inputs": [
+        "Conv__274:0",
+        "Conv2D_24/filter:0",
+        "Add_24/y:0"
+      ],
+      "outputs": [
+        "Conv__277:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_24/Relu6_model_1/model/batch_normalization_36/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_24/Conv2D",
+      "inputs": [
+        "Conv__277:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_24/Relu6_model_1/model/batch_normalization_36/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_24/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__278",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_24/Relu6_model_1/model/batch_normalization_36/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_24/Conv2D:0",
+        "const_fold_opt__297",
+        "Add_25/y:0"
+      ],
+      "outputs": [
+        "Conv__278:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 1152,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_25/Relu6_model_1/model/batch_normalization_37/FusedBatchNormV3_model_1/model/depthwise_conv2d_12/depthwise_model_1/model/depthwise_conv2d_15/depthwise",
+      "inputs": [
+        "Conv__278:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_25/Relu6_model_1/model/batch_normalization_37/FusedBatchNormV3_model_1/model/depthwise_conv2d_12/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__279",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_25/Relu6_model_1/model/batch_normalization_37/FusedBatchNormV3_model_1/model/depthwise_conv2d_12/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+        "Conv2D_25/filter:0",
+        "model_1/model/batch_normalization_38/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_25/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__279:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_6/AddV2",
+      "inputs": [
+        "Conv__279:0",
+        "Conv__274:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_6/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__282",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_6/AddV2:0",
+        "Conv2D_26/filter:0",
+        "Add_26/y:0"
+      ],
+      "outputs": [
+        "Conv__282:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_26/Relu6_model_1/model/batch_normalization_39/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_26/Conv2D",
+      "inputs": [
+        "Conv__282:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_26/Relu6_model_1/model/batch_normalization_39/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_26/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__283",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_26/Relu6_model_1/model/batch_normalization_39/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_26/Conv2D:0",
+        "const_fold_opt__311",
+        "Add_27/y:0"
+      ],
+      "outputs": [
+        "Conv__283:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 1152,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_27/Relu6_model_1/model/batch_normalization_40/FusedBatchNormV3_model_1/model/depthwise_conv2d_13/depthwise_model_1/model/depthwise_conv2d_15/depthwise",
+      "inputs": [
+        "Conv__283:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_27/Relu6_model_1/model/batch_normalization_40/FusedBatchNormV3_model_1/model/depthwise_conv2d_13/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__284",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_27/Relu6_model_1/model/batch_normalization_40/FusedBatchNormV3_model_1/model/depthwise_conv2d_13/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+        "Conv2D_27/filter:0",
+        "model_1/model/batch_normalization_41/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D_model_1/model/conv2d_27/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__284:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_7/AddV2",
+      "inputs": [
+        "Conv__284:0",
+        "model_1/model/tf.__operators__.add_6/AddV2:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_7/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__287",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_7/AddV2:0",
+        "Conv2D_28/filter:0",
+        "Add_28/y:0"
+      ],
+      "outputs": [
+        "Conv__287:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_28/Relu6_model_1/model/batch_normalization_42/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_28/Conv2D",
+      "inputs": [
+        "Conv__287:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_28/Relu6_model_1/model/batch_normalization_42/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_28/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__288",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_28/Relu6_model_1/model/batch_normalization_42/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_28/Conv2D:0",
+        "const_fold_opt__305",
+        "Add_29/y:0"
+      ],
+      "outputs": [
+        "Conv__288:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          5,
+          5
+        ],
+        "group": 1152,
+        "pads": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_29/Relu6_model_1/model/batch_normalization_43/FusedBatchNormV3_model_1/model/depthwise_conv2d_14/depthwise_model_1/model/depthwise_conv2d_15/depthwise",
+      "inputs": [
+        "Conv__288:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_29/Relu6_model_1/model/batch_normalization_43/FusedBatchNormV3_model_1/model/depthwise_conv2d_14/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__289",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_29/Relu6_model_1/model/batch_normalization_43/FusedBatchNormV3_model_1/model/depthwise_conv2d_14/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+        "Conv2D_29/filter:0",
+        "model_1/model/batch_normalization_44/FusedBatchNormV3_model_1/model/conv2d_29/Conv2D1/y:0"
+      ],
+      "outputs": [
+        "Conv__289:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/tf.__operators__.add_8/AddV2",
+      "inputs": [
+        "Conv__289:0",
+        "model_1/model/tf.__operators__.add_7/AddV2:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.__operators__.add_8/AddV2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__290",
+      "inputs": [
+        "model_1/model/tf.__operators__.add_8/AddV2:0",
+        "Conv2D_30/filter:0",
+        "Add_30/y:0"
+      ],
+      "outputs": [
+        "Conv__290:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          1,
+          1
+        ],
+        "pads": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "group": 1
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_30/Relu6_model_1/model/batch_normalization_45/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_30/Conv2D",
+      "inputs": [
+        "Conv__290:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_30/Relu6_model_1/model/batch_normalization_45/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_30/Conv2D:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Conv",
+      "name": "Conv__291",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_30/Relu6_model_1/model/batch_normalization_45/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_30/Conv2D:0",
+        "const_fold_opt__302",
+        "Add_31/y:0"
+      ],
+      "outputs": [
+        "Conv__291:0"
+      ],
+      "attrs": {
+        "dilations": [
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1
+        ],
+        "kernel_shape": [
+          3,
+          3
+        ],
+        "group": 1152,
+        "pads": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "op": "Clip",
+      "name": "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise",
+      "inputs": [
+        "Conv__291:0",
+        "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D_min__80",
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_max__220"
+      ],
+      "outputs": [
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "GlobalAveragePool",
+      "name": "model_1/model/tf.math.reduce_mean/Mean",
+      "inputs": [
+        "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise:0"
+      ],
+      "outputs": [
+        "model_1/model/tf.math.reduce_mean/Mean:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Reshape",
+      "name": "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape",
+      "inputs": [
+        "model_1/model/tf.math.reduce_mean/Mean:0",
+        "const_fold_opt__296"
+      ],
+      "outputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "MatMul",
+      "name": "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot/MatMul",
+      "inputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape:0",
+        "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "MatMul",
+      "name": "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/MatMul",
+      "inputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape:0",
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "MatMul",
+      "name": "Identity_dense/Tensordot/MatMul",
+      "inputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape:0",
+        "Identity_dense/Tensordot/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "Identity_dense/Tensordot:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/BiasAdd",
+      "inputs": [
+        "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot:0",
+        "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/BiasAdd/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "Squeeze_1:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Add",
+      "name": "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/BiasAdd",
+      "inputs": [
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot:0",
+        "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/BiasAdd/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "Squeeze_2:0"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Add",
+      "name": "Identity_dense/BiasAdd",
+      "inputs": [
+        "Identity_dense/Tensordot:0",
+        "Identity_dense/BiasAdd/ReadVariableOp:0"
+      ],
+      "outputs": [
+        "xyz_x21"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Sigmoid",
+      "name": "Identity_1",
+      "inputs": [
+        "Squeeze_1:0"
+      ],
+      "outputs": [
+        "hand_score"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Sigmoid",
+      "name": "Identity_2",
+      "inputs": [
+        "Squeeze_2:0"
+      ],
+      "outputs": [
+        "left_hand_0_or_right_hand_1"
+      ],
+      "attrs": {}
+    },
+    {
+      "op": "Round",
+      "name": "Round_0",
+      "inputs": [
+        "left_hand_0_or_right_hand_1"
+      ],
+      "outputs": [
+        "lefthand_0_or_righthand_1"
+      ],
+      "attrs": {}
+    }
+  ]
+}

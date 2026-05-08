@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Hand Landmark f16 vs f32 Benchmark</title></head>
+<body style="background:#111;color:#0f0;font:13px monospace;padding:16px;white-space:pre-wrap;">
+<div id="log">Hand Landmark f16 vs f32 Benchmark
+====================================
+</div>
+<script type="module">
+import { ModelRunner } from './model-runner.js';
+
+const L = document.getElementById('log');
+const log = s => { L.textContent += s + '\n'; console.log(s); };
+
+(async () => {
+try {
+  if (!navigator.gpu) { log('No WebGPU'); return; }
+  const adapter = await navigator.gpu.requestAdapter();
+
+  // Check shader-f16 support
+  if (!adapter.features.has('shader-f16')) {
+    log('ERROR: shader-f16 not supported on this device');
+    return;
+  }
+  log('shader-f16: SUPPORTED');
+
+  const device = await adapter.requestDevice({
+    requiredFeatures: ['shader-f16'],
+  });
+  log('WebGPU device ready with shader-f16');
+
+  // Load both models
+  const [graphF32, weightsF32Raw, graphF16, weightsF16Raw] = await Promise.all([
+    fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.json').then(r => r.json()),
+    fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.bin').then(r => r.arrayBuffer()),
+    fetch('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16.json').then(r => r.json()),
+    fetch('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16.bin').then(r => r.arrayBuffer()),
+  ]);
+  const weightsF32 = new Float32Array(weightsF32Raw);
+  const weightsF16 = new Float16Array(weightsF16Raw);
+  log(`f32 model: ${(weightsF32.byteLength/1024/1024).toFixed(1)} MB`);
+  log(`f16 model: ${(weightsF16.byteLength/1024/1024).toFixed(1)} MB`);
+
+  // Compile f32 shader pipelines
+  const mkPipeline = async (name) => {
+    const code = await (await fetch(`./${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P_f32 = {
+    conv2d: await mkPipeline('conv2d'),
+    gemm: await mkPipeline('gemm'),
+    global_avg_pool: await mkPipeline('global_avg_pool'),
+    add: await mkPipeline('add'),
+    fused_block: await mkPipeline('fused_block'),
+    transpose_nhwc: await mkPipeline('transpose_nhwc'),
+  };
+  log('f32 shaders compiled');
+
+  // Compile f16 shader pipelines
+  const mkPipelineF16 = async (name) => {
+    const code = await (await fetch(`./${name}_f16.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P_f16 = {
+    conv2d: await mkPipelineF16('conv2d'),
+    gemm: await mkPipelineF16('gemm'),
+    global_avg_pool: await mkPipelineF16('global_avg_pool'),
+    add: await mkPipelineF16('add'),
+    fused_block: await mkPipelineF16('fused_block'),
+    transpose_nhwc: P_f32.transpose_nhwc, // not used by sparse model
+  };
+  log('f16 shaders compiled');
+
+  // === F32 SETUP ===
+  const W_f32 = {};
+  for (const [name, info] of Object.entries(graphF32.weights)) {
+    if (info.length === 0) continue;
+    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, weightsF32.subarray(info.offset, info.offset + info.length));
+    W_f32[name] = buf;
+  }
+  const allWeightsBufF32 = device.createBuffer({ size: weightsF32.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBufF32, 0, weightsF32);
+
+  // === F16 SETUP ===
+  // WebGPU writeBuffer requires byte size % 4 == 0. f16 elements are 2 bytes,
+  // so odd-length tensors need padding to the next even count.
+  const align4 = (f16arr) => {
+    if (f16arr.byteLength % 4 === 0) return f16arr;
+    const padded = new Float16Array(f16arr.length + 1);
+    padded.set(f16arr);
+    return padded;
+  };
+  const W_f16 = {};
+  for (const [name, info] of Object.entries(graphF16.weights)) {
+    if (info.length === 0) continue;
+    const data = align4(weightsF16.subarray(info.offset, info.offset + info.length));
+    const buf = device.createBuffer({ size: Math.max(data.byteLength, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, data);
+    W_f16[name] = buf;
+  }
+  const allWeightsF16Padded = align4(weightsF16);
+  const allWeightsBufF16 = device.createBuffer({ size: allWeightsF16Padded.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBufF16, 0, allWeightsF16Padded);
+
+  // Input: NCHW (1, 3, 224, 224), 0.5 gray
+  const H = 224, Wi = 224;
+  const BF = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+
+  const inputF32 = new Float32Array(3 * H * Wi).fill(0.5);
+  const inputBufF32 = device.createBuffer({ size: inputF32.byteLength, usage: BF });
+  device.queue.writeBuffer(inputBufF32, 0, inputF32);
+
+  const inputF16 = new Float16Array(3 * H * Wi).fill(0.5);
+  const inputBufF16 = device.createBuffer({ size: inputF16.byteLength, usage: BF });
+  device.queue.writeBuffer(inputBufF16, 0, inputF16);
+
+  // Create runners
+  const runnerF32 = new ModelRunner(device, P_f32, W_f32, allWeightsBufF32);
+  const runnerF16 = new ModelRunner(device, P_f16, W_f16, allWeightsBufF16, { f16: true });
+
+  // === F32 correctness ===
+  log('\n--- f32 inference ---');
+  const outF32 = await runnerF32.run(graphF32, inputBufF32, weightsF32);
+  for (const [name, data] of Object.entries(outF32)) {
+    const vals = Array.from(data.slice(0, 6)).map(v => v.toFixed(4)).join(', ');
+    log(`  ${name} (${data.length}): [${vals}...]`);
+  }
+
+  // === F16 correctness ===
+  log('\n--- f16 inference ---');
+  const outF16 = await runnerF16.run(graphF16, inputBufF16, weightsF16);
+  for (const [name, data] of Object.entries(outF16)) {
+    const vals = Array.from(data.slice(0, 6)).map(v => Number(v).toFixed(4)).join(', ');
+    log(`  ${name} (${data.length}): [${vals}...]`);
+  }
+
+  // === F16 DIAGNOSTIC: verify everything is really f16 ===
+  log('\n--- f16 diagnostic ---');
+  log(`  runner.f16=${runnerF16.f16}  bpe=${runnerF16.bpe}  TypedArray=${runnerF16.TypedArray.name}`);
+  log(`  input buffer: ${inputBufF16.size} bytes (expect ${3*H*Wi*2} for f16)`);
+  // Check weight buffer sizes
+  let totalWF32 = 0, totalWF16 = 0;
+  for (const [name, buf] of Object.entries(W_f32)) totalWF32 += buf.size;
+  for (const [name, buf] of Object.entries(W_f16)) totalWF16 += buf.size;
+  log(`  weight buffers: f32=${(totalWF32/1024/1024).toFixed(2)} MB, f16=${(totalWF16/1024/1024).toFixed(2)} MB, ratio=${(totalWF16/totalWF32).toFixed(2)}`);
+  log(`  allWeightsBuf: f32=${allWeightsBufF32.size} bytes, f16=${allWeightsBufF16.size} bytes`);
+  // Check intermediate tensor sizes by re-running with dumpAll
+  const dumpF32 = await runnerF32.run(graphF32, inputBufF32, weightsF32, false, true);
+  const dumpF16 = await runnerF16.run(graphF16, inputBufF16, weightsF16, false, true);
+  let totalIntermF32 = 0, totalIntermF16 = 0;
+  for (const [idx, t] of Object.entries(dumpF32)) totalIntermF32 += t.data.byteLength;
+  for (const [idx, t] of Object.entries(dumpF16)) totalIntermF16 += t.data.byteLength;
+  log(`  intermediate tensors: f32=${(totalIntermF32/1024).toFixed(0)} KB, f16=${(totalIntermF16/1024).toFixed(0)} KB, ratio=${(totalIntermF16/totalIntermF32).toFixed(2)}`);
+  // Show a few specific tensor sizes
+  const keys32 = Object.keys(dumpF32).sort((a,b) => a-b);
+  const keys16 = Object.keys(dumpF16).sort((a,b) => a-b);
+  log(`  tensor count: f32=${keys32.length}, f16=${keys16.length}`);
+  for (const k of keys32.slice(0, 5)) {
+    const t32 = dumpF32[k];
+    const t16 = dumpF16[k];
+    if (t16) {
+      log(`    node ${k} (${t32.op}): f32=${t32.data.byteLength}B  f16=${t16.data.byteLength}B  ${t32.data.constructor.name} vs ${t16.data.constructor.name}`);
+    }
+  }
+
+  // Compare outputs
+  log('\n--- f16 vs f32 accuracy ---');
+  for (const name of Object.keys(outF32)) {
+    const f32 = outF32[name];
+    const f16 = outF16[name];
+    if (!f16) { log(`  ${name}: MISSING in f16`); continue; }
+    let maxErr = 0, sumErr = 0;
+    for (let i = 0; i < f32.length; i++) {
+      const err = Math.abs(f32[i] - Number(f16[i]));
+      maxErr = Math.max(maxErr, err);
+      sumErr += err;
+    }
+    log(`  ${name}: max_err=${maxErr.toFixed(6)}, mean_err=${(sumErr/f32.length).toFixed(6)}`);
+  }
+
+  // === BENCHMARK: f32 ===
+  log('\n--- f32 Benchmark (5 x 50 iterations) ---');
+  await runnerF32.compile(graphF32, inputBufF32, weightsF32);
+  for (let i = 0; i < 20; i++) await runnerF32.runCompiled();
+  const N = 50;
+  const batchesF32 = [];
+  for (let b = 0; b < 5; b++) {
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) await runnerF32.runCompiled();
+    const ms = (performance.now() - t0) / N;
+    batchesF32.push(ms);
+    log(`  BATCH ${b+1}: ${ms.toFixed(2)} ms`);
+  }
+  batchesF32.sort((a, b) => a - b);
+  const medF32 = batchesF32[2];
+
+  // === BENCHMARK: f16 ===
+  log('\n--- f16 Benchmark (5 x 50 iterations) ---');
+  await runnerF16.compile(graphF16, inputBufF16, weightsF16);
+  for (let i = 0; i < 20; i++) await runnerF16.runCompiled();
+  const batchesF16 = [];
+  for (let b = 0; b < 5; b++) {
+    const t0 = performance.now();
+    for (let i = 0; i < N; i++) await runnerF16.runCompiled();
+    const ms = (performance.now() - t0) / N;
+    batchesF16.push(ms);
+    log(`  BATCH ${b+1}: ${ms.toFixed(2)} ms`);
+  }
+  batchesF16.sort((a, b) => a - b);
+  const medF16 = batchesF16[2];
+
+  // Results
+  log('\n====================================');
+  log(`f32 MEDIAN: ${medF32.toFixed(2)} ms`);
+  log(`f16 MEDIAN: ${medF16.toFixed(2)} ms`);
+  log(`Speedup: ${(medF32 / medF16).toFixed(2)}x`);
+  log(`Memory: ${(weightsF32.byteLength/1024/1024).toFixed(1)} MB -> ${(weightsF16.byteLength/1024/1024).toFixed(1)} MB (${((1 - weightsF16.byteLength/weightsF32.byteLength)*100).toFixed(0)}% smaller)`);
+  log('====================================');
+  log('done');
+} catch (e) {
+  log('ERROR: ' + e.message);
+  log(e.stack || '');
+}
+})();
+</script>
+</body>
+</html>

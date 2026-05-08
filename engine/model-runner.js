@@ -10,11 +10,14 @@
 import { log } from '../src/log-gates.js';
 
 export class ModelRunner {
-  constructor(device, pipelines, weightBufs, allWeightsBuf) {
+  constructor(device, pipelines, weightBufs, allWeightsBuf, options = {}) {
     this.device = device;
     this.P = pipelines;     // { conv2d, maxpool, resize, gemm, global_avg_pool, add, fused_block }
     this.W = weightBufs;    // weight name -> GPUBuffer
     this.allWeightsBuf = allWeightsBuf; // single GPU buffer with ALL weights (for fused shader)
+    this.f16 = !!options.f16;
+    this.bpe = this.f16 ? 2 : 4;
+    this.TypedArray = this.f16 ? Float16Array : Float32Array;
     this.dummy = device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE });
     // Uniform buffer pool: reuse instead of creating per dispatch
     this._ubPool = [];
@@ -59,11 +62,13 @@ export class ModelRunner {
     const tensors = {};
     tensors[graph.input.name] = inputBuf;
 
+    const bpe = this.bpe;
     const getOrAlloc = (name, shape) => {
       if (tensors[name]) return tensors[name];
       let floats = 1;
       for (const d of shape) floats *= d;
-      const buf = device.createBuffer({ size: Math.max(floats * 4, 4), usage: BF });
+      const rawBytes = floats * bpe;
+      const buf = device.createBuffer({ size: Math.max(rawBytes + (rawBytes % 4), 4), usage: BF });
       tensors[name] = buf;
       return buf;
     };
@@ -769,7 +774,7 @@ export class ModelRunner {
         const outBuf = getOrAlloc(out, [1, totalFloats]);
         let dstOffset = 0;
         for (const piece of pieces) {
-          copyBuf(enc, piece.buf, 0, outBuf, dstOffset * 4, piece.floats * 4);
+          copyBuf(enc, piece.buf, 0, outBuf, dstOffset * bpe, piece.floats * bpe);
           dstOffset += piece.floats;
         }
         shapes[out] = [1, totalFloats];
@@ -826,7 +831,7 @@ export class ModelRunner {
         const name = g[idx].outputs[0];
         const buf = tensors[name];
         if (!buf) { console.log(`  node ${idx} (${g[idx].op}): no buffer for '${name}'`); continue; }
-        const n = buf.size / 4;
+        const n = buf.size / bpe;
         const data = await this._readBuffer(buf, n);
         let mn = Infinity, mx = -Infinity;
         for (let j = 0; j < data.length; j++) { mn = Math.min(mn, data[j]); mx = Math.max(mx, data[j]); }
@@ -850,7 +855,7 @@ export class ModelRunner {
         if (emitted.has(buf)) continue;
         emitted.add(buf);
         const name = g[idx].outputs[0];
-        const n = buf.size / 4;
+        const n = buf.size / bpe;
         allTensors[idx] = {
           name, op: g[idx].op,
           shape: shapes[name] || [n],
@@ -1104,9 +1109,11 @@ export class ModelRunner {
   /** Read outputs from staging buffers (call after submit + GPU completion). */
   async readOutputs() {
     const outputs = {};
+    const TA = this.TypedArray;
     await Promise.all(this._readbackInfos.map(async (info) => {
       await info.staging.mapAsync(GPUMapMode.READ);
-      info.output.set(new Float32Array(info.staging.getMappedRange()));
+      const mapped = new TA(info.staging.getMappedRange());
+      info.output.set(mapped.subarray(0, info.floats));
       info.staging.unmap();
       outputs[info.name] = info.output;
     }));
@@ -1117,25 +1124,28 @@ export class ModelRunner {
   _buildReadbackBuffers() {
     this._readbackInfos = [];
     for (const [name, info] of Object.entries(this._outputBufs)) {
-      const bytes = info.floats * 4;
+      const rawBytes = info.floats * this.bpe;
+      const bytes = rawBytes + (rawBytes % 4); // align to 4 bytes for WebGPU
       const staging = this.device.createBuffer({
         size: bytes,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       });
       this._readbackInfos.push({
-        name, src: info.buf, staging, bytes,
-        output: new Float32Array(info.floats), // pre-allocated, reused every frame
+        name, src: info.buf, staging, bytes, floats: info.floats,
+        output: new this.TypedArray(info.floats),
       });
     }
   }
 
   async _readBuffer(gpuBuf, floats) {
-    const rb = this.device.createBuffer({ size: floats * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const rawBytes = floats * this.bpe;
+    const bytes = rawBytes + (rawBytes % 4); // align to 4 bytes for WebGPU
+    const rb = this.device.createBuffer({ size: bytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     const enc = this.device.createCommandEncoder();
-    enc.copyBufferToBuffer(gpuBuf, 0, rb, 0, floats * 4);
+    enc.copyBufferToBuffer(gpuBuf, 0, rb, 0, bytes);
     this.device.queue.submit([enc.finish()]);
     await rb.mapAsync(GPUMapMode.READ);
-    const data = new Float32Array(rb.getMappedRange()).slice();
+    const data = new this.TypedArray(rb.getMappedRange()).slice(0, floats);
     rb.unmap();
     rb.destroy();
     return data;

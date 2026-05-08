@@ -101,6 +101,24 @@ class LandmarkWorker {
     });
   }
 
+  switchModel(variant) {
+    return new Promise((resolve, reject) => {
+      const prev = this.worker.onmessage;
+      this.worker.onmessage = (e) => {
+        if (e.data.type === 'modelSwitched') {
+          this.worker.onmessage = (ev) => this._onMessage(ev);
+          resolve(e.data.variant);
+        } else if (e.data.type === 'error') {
+          this.worker.onmessage = (ev) => this._onMessage(ev);
+          reject(new Error(e.data.message));
+        } else {
+          this._onMessage(e);
+        }
+      };
+      this.worker.postMessage({ type: 'switchModel', variant });
+    });
+  }
+
   infer(frame, rect, vw, vh) {
     return new Promise((resolve) => {
       this.pendingResolve = resolve;
@@ -553,5 +571,10 @@ export class HandTracker {
     const shiftCy = cy - 0.1 * height * cos;
 
     return { cx: shiftCx, cy: shiftCy, w: size, h: size, angle };
+  }
+
+  async switchModel(variant) {
+    await Promise.all(this.landmarkWorkers.map(w => w.switchModel(variant)));
+    log('lifecycle', `[HandTracker] switched to model: ${variant}`);
   }
 }

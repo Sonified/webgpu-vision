@@ -7,17 +7,29 @@ import { ModelRunner } from '../engine/model-runner.js';
 applyLogGatesFromUrl();
 
 const S = 224; // landmark model input size
-const MODEL_JSON_URL = '../models/hand/hand_landmark_4mb/hand_landmark_full.json';
-const MODEL_BIN_URL = '../models/hand/hand_landmark_4mb/hand_landmark_full.bin';
 
+const MODEL_VARIANTS = {
+  '4mb-f32':  { json: '../models/hand/hand_landmark_4mb/hand_landmark_full',           f16: false },
+  '4mb-f16':  { json: '../models/hand/hand_landmark_f16_2mb/hand_landmark_full_f16',   f16: true  },
+  '10mb-f32': { json: '../models/hand/hand_landmark_10mb/hand_landmark_sparse',        f16: false },
+  '10mb-f16': { json: '../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16', f16: true  },
+};
+
+let currentVariant = '4mb-f32';
 let runner = null;
 let device = null;
 let inputBuf = null; // also the warp output buffer
+let hasF16 = false;
 
 // GPU warp state
 let warpPipeline = null;
 let uniformBuffer = null;
 let gpuSampler = null;
+
+// f32->f16 cast state
+let castPipeline = null;
+let castBindGroup = null;
+let castParamsBuf = null;
 
 // Output field mapping (discovered during init from model outputs)
 let outputNames = {};
@@ -94,11 +106,18 @@ function computeAffineParams(rect) {
   };
 }
 
-async function initGPU() {
-  const adapter = await navigator.gpu.requestAdapter();
-  device = await adapter.requestDevice();
+// Shader pipeline caches (compiled once per device lifetime)
+let pipelinesF32 = null;
+let pipelinesF16 = null;
 
-  // Warp pipeline
+async function initGPU(variant) {
+  currentVariant = variant || '4mb-f32';
+  const adapter = await navigator.gpu.requestAdapter();
+  hasF16 = adapter.features.has('shader-f16');
+  const features = hasF16 ? ['shader-f16'] : [];
+  device = await adapter.requestDevice({ requiredFeatures: features });
+
+  // Warp pipeline (always f32 -- pixel data from camera)
   warpPipeline = device.createComputePipeline({
     layout: 'auto',
     compute: { module: device.createShaderModule({ code: WGSL_WARP }), entryPoint: 'main' },
@@ -109,42 +128,112 @@ async function initGPU() {
   uniformBuffer = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   gpuSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
-  // Load model
-  const graph = await (await fetch(MODEL_JSON_URL)).json();
-  const allWeights = new Float32Array(await (await fetch(MODEL_BIN_URL)).arrayBuffer());
-
-  const W = {};
-  for (const [name, info] of Object.entries(graph.weights)) {
-    if (info.length === 0) continue;
-    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, allWeights.subarray(info.offset, info.offset + info.length));
-    W[name] = buf;
-  }
-
-  const allWeightsBuf = device.createBuffer({ size: allWeights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(allWeightsBuf, 0, allWeights);
-
+  // Compile f32 pipelines
   const mkP = async (name) => {
     const code = await (await fetch(`../engine/${name}.wgsl`)).text();
     return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
   };
-  const P = {
+  pipelinesF32 = {
     conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
     gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
     add: await mkP('add'), fused_block: await mkP('fused_block'),
-    transpose_nhwc: await mkP('transpose_nhwc'),
+    transpose_nhwc: await mkP('transpose_nhwc'), pad_channels: await mkP('pad_channels'),
   };
 
-  runner = new ModelRunner(device, P, W, allWeightsBuf);
-  const outputs = await runner.compile(graph, inputBuf, allWeights);
+  // Compile f16 pipelines + cast shader if supported
+  if (hasF16) {
+    const mkF16 = async (name) => {
+      const code = await (await fetch(`../engine/${name}_f16.wgsl`)).text();
+      return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+    };
+    pipelinesF16 = {
+      conv2d: await mkF16('conv2d'), maxpool: await mkF16('maxpool'),
+      gemm: await mkF16('gemm'), global_avg_pool: await mkF16('global_avg_pool'),
+      add: await mkF16('add'), fused_block: await mkF16('fused_block'),
+      resize: pipelinesF32.resize, transpose_nhwc: pipelinesF32.transpose_nhwc,
+      pad_channels: pipelinesF32.pad_channels,
+    };
+    const castCode = await (await fetch('../engine/cast_f32_to_f16.wgsl')).text();
+    castPipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: device.createShaderModule({ code: castCode }), entryPoint: 'main' },
+    });
+    castParamsBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(castParamsBuf, 0, new Uint32Array([S * S * 3]));
+  }
 
-  // Discover output names by size
+  await loadModel(currentVariant);
+}
+
+// f16 input buffer (lazily created when first f16 model is loaded)
+let inputBufF16 = null;
+
+async function loadModel(variant) {
+  currentVariant = variant;
+  const spec = MODEL_VARIANTS[variant];
+  if (!spec) throw new Error(`Unknown model variant: ${variant}`);
+  if (spec.f16 && !hasF16) throw new Error('shader-f16 not supported on this device');
+
+  const isF16 = spec.f16;
+  const bpe = isF16 ? 2 : 4;
+  const TA = isF16 ? Float16Array : Float32Array;
+  const P = isF16 ? pipelinesF16 : pipelinesF32;
+
+  const graph = await (await fetch(spec.json + '.json')).json();
+  const allWeights = new TA(await (await fetch(spec.json + '.bin')).arrayBuffer());
+
+  const align4 = (arr) => {
+    if (arr.byteLength % 4 === 0) return arr;
+    const padded = new TA(arr.length + 1);
+    padded.set(arr);
+    return padded;
+  };
+
+  const W = {};
+  for (const [name, info] of Object.entries(graph.weights)) {
+    if (info.length === 0) continue;
+    const data = align4(allWeights.subarray(info.offset, info.offset + info.length));
+    const buf = device.createBuffer({ size: Math.max(data.byteLength, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, data);
+    W[name] = buf;
+  }
+
+  const allWPadded = align4(allWeights);
+  const allWeightsBuf = device.createBuffer({ size: allWPadded.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBuf, 0, allWPadded);
+
+  let modelInputBuf = inputBuf;
+  if (isF16) {
+    if (!inputBufF16) {
+      inputBufF16 = device.createBuffer({
+        size: S * S * 3 * 2 + (S * S * 3 * 2 % 4),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+    }
+    modelInputBuf = inputBufF16;
+    castBindGroup = device.createBindGroup({
+      layout: castPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: castParamsBuf } },
+        { binding: 1, resource: { buffer: inputBuf } },
+        { binding: 2, resource: { buffer: inputBufF16 } },
+      ],
+    });
+  } else {
+    castBindGroup = null;
+  }
+
+  runner = new ModelRunner(device, P, W, allWeightsBuf, isF16 ? { f16: true } : {});
+  const outputs = await runner.compile(graph, modelInputBuf, allWeights);
+
+  outputNames = {};
   for (const [name, data] of Object.entries(outputs)) {
     if (data.length === 63 && !outputNames.landmarks) outputNames.landmarks = name;
     else if (data.length === 63) outputNames.worldLandmarks = name;
     else if (data.length === 1 && !outputNames.handFlag) outputNames.handFlag = name;
     else if (data.length === 1) outputNames.handedness = name;
   }
+  log('lifecycle', `[landmark-worker-wgsl] loaded model: ${variant}`);
 }
 
 // Cached warp GPU resources -- reused every frame (only recreated if video resolution changes)
@@ -205,6 +294,16 @@ self.onmessage = async (e) => {
     }
   }
 
+  if (type === 'switchModel') {
+    try {
+      await loadModel(e.data.variant);
+      self.postMessage({ type: 'modelSwitched', variant: e.data.variant });
+    } catch (err) {
+      console.error('[landmark-worker-wgsl] switchModel error:', err);
+      self.postMessage({ type: 'error', message: err.message });
+    }
+  }
+
   if (type === 'infer') {
     try {
       const { frame, rect, vw, vh } = e.data;
@@ -220,9 +319,16 @@ self.onmessage = async (e) => {
       dispatchWarp(frame, inv);
       frame.close();
 
-      // Single encoder: warp dispatch + inference dispatches + readback copies
+      // Single encoder: warp dispatch + (optional f32->f16 cast) + inference dispatches + readback copies
       const enc = device.createCommandEncoder();
       encodeWarp(enc);
+      if (castBindGroup) {
+        const castPass = enc.beginComputePass();
+        castPass.setPipeline(castPipeline);
+        castPass.setBindGroup(0, castBindGroup);
+        castPass.dispatchWorkgroups(Math.ceil(S * S * 3 / 256));
+        castPass.end();
+      }
       runner.encodeInto(enc);
       device.queue.submit([enc.finish()]);
       const outputs = await runner.readOutputs();

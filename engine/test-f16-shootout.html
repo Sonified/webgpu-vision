@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>f16 Shootout: All Models</title></head>
+<body style="background:#111;color:#0f0;font:13px monospace;padding:16px;white-space:pre-wrap;">
+<div id="log">f16 Shootout: All Hand Landmark Models
+========================================
+</div>
+<script type="module">
+import { ModelRunner } from './model-runner.js';
+
+const L = document.getElementById('log');
+const log = s => { L.textContent += s + '\n'; console.log(s); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function benchOnce(device, graphJson, weightsTyped, pipelines, isF16) {
+  const align4 = (arr) => {
+    if (arr.byteLength % 4 === 0) return arr;
+    const TA = isF16 ? Float16Array : Float32Array;
+    const padded = new TA(arr.length + 1);
+    padded.set(arr);
+    return padded;
+  };
+
+  const W = {};
+  for (const [name, info] of Object.entries(graphJson.weights)) {
+    if (info.length === 0) continue;
+    const data = align4(weightsTyped.subarray(info.offset, info.offset + info.length));
+    const buf = device.createBuffer({ size: Math.max(data.byteLength, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, data);
+    W[name] = buf;
+  }
+  const allW = align4(weightsTyped);
+  const allWBuf = device.createBuffer({ size: allW.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWBuf, 0, allW);
+
+  const H = 224, Wi = 224;
+  const BF = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+  const TA = isF16 ? Float16Array : Float32Array;
+  const inputData = new TA(3 * H * Wi).fill(0.5);
+  const inputBuf = device.createBuffer({ size: inputData.byteLength, usage: BF });
+  device.queue.writeBuffer(inputBuf, 0, inputData);
+
+  const runner = new ModelRunner(device, pipelines, W, allWBuf, isF16 ? { f16: true } : {});
+
+  // Compile + warmup
+  await runner.compile(graphJson, inputBuf, weightsTyped);
+  for (let i = 0; i < 20; i++) await runner.runCompiled();
+
+  // Single timed batch of 50
+  const N = 50;
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) await runner.runCompiled();
+  const ms = (performance.now() - t0) / N;
+
+  // Destroy everything
+  for (const buf of Object.values(W)) buf.destroy();
+  allWBuf.destroy();
+  inputBuf.destroy();
+  runner.dummy.destroy();
+  if (runner._ubPool) runner._ubPool.forEach(b => b.destroy());
+  if (runner._readbackInfos) runner._readbackInfos.forEach(i => { i.staging.destroy(); try { i.src.destroy(); } catch(e) {} });
+  if (runner._capturedTensors) {
+    const seen = new Set();
+    for (const buf of Object.values(runner._capturedTensors)) {
+      if (buf && !seen.has(buf)) { seen.add(buf); try { buf.destroy(); } catch(e) {} }
+    }
+  }
+  await device.queue.onSubmittedWorkDone();
+
+  return ms;
+}
+
+(async () => {
+try {
+  if (!navigator.gpu) { log('No WebGPU'); return; }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter.features.has('shader-f16')) { log('ERROR: shader-f16 not supported'); return; }
+  const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] });
+  log('WebGPU + shader-f16 ready\n');
+
+  // Compile all pipelines
+  const mk = async (name) => {
+    const code = await (await fetch(`./${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const mkF16 = async (name) => {
+    const code = await (await fetch(`./${name}_f16.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const P32 = {
+    conv2d: await mk('conv2d'), gemm: await mk('gemm'), global_avg_pool: await mk('global_avg_pool'),
+    add: await mk('add'), fused_block: await mk('fused_block'), transpose_nhwc: await mk('transpose_nhwc'),
+    maxpool: await mk('maxpool'), pad_channels: await mk('pad_channels'),
+  };
+  const P16 = {
+    conv2d: await mkF16('conv2d'), gemm: await mkF16('gemm'), global_avg_pool: await mkF16('global_avg_pool'),
+    add: await mkF16('add'), fused_block: await mkF16('fused_block'), transpose_nhwc: P32.transpose_nhwc,
+    maxpool: await mkF16('maxpool'), pad_channels: P32.pad_channels,
+  };
+  log('All shaders compiled\n');
+
+  // Load models
+  const load = async (path) => {
+    const [json, bin] = await Promise.all([
+      fetch(path + '.json').then(r => r.json()),
+      fetch(path + '.bin').then(r => r.arrayBuffer()),
+    ]);
+    return { json, bin };
+  };
+  const m4f32  = await load('../models/hand/hand_landmark_4mb/hand_landmark_full');
+  const m4f16  = await load('../models/hand/hand_landmark_f16_2mb/hand_landmark_full_f16');
+  const m10f32 = await load('../models/hand/hand_landmark_10mb/hand_landmark_sparse');
+  const m10f16 = await load('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16');
+  log('All models loaded\n');
+
+  // Define the 4 contestants
+  const models = [
+    { id: '4MB f32',  size: '3.9 MB', g: m4f32.json,  w: new Float32Array(m4f32.bin),   P: P32, f16: false },
+    { id: '4MB f16',  size: '1.9 MB', g: m4f16.json,  w: new Float16Array(m4f16.bin),   P: P16, f16: true  },
+    { id: '10MB f32', size: '10.1 MB', g: m10f32.json, w: new Float32Array(m10f32.bin),  P: P32, f16: false },
+    { id: '10MB f16', size: '5.0 MB', g: m10f16.json, w: new Float16Array(m10f16.bin),  P: P16, f16: true  },
+  ];
+
+  // Run 4 rounds, each in a different order, with cooldown between each test.
+  // Round orders: [0,1,2,3], [3,2,1,0], [1,3,0,2], [2,0,3,1]
+  const orders = [
+    [0, 1, 2, 3],
+    [3, 2, 1, 0],
+    [1, 3, 0, 2],
+    [2, 0, 3, 1],
+  ];
+  const allResults = models.map(() => []);
+
+  for (let round = 0; round < orders.length; round++) {
+    const order = orders[round];
+    log(`--- Round ${round + 1} (order: ${order.map(i => models[i].id).join(', ')}) ---`);
+
+    for (const idx of order) {
+      const m = models[idx];
+      await sleep(1500); // 1.5s cooldown between each test
+      const ms = await benchOnce(device, m.g, m.w, m.P, m.f16);
+      allResults[idx].push(ms);
+      log(`  ${m.id}: ${ms.toFixed(2)} ms`);
+    }
+    log('');
+  }
+
+  // Take the best result for each model (least thermal interference)
+  log('========================================');
+  log('         RESULTS (best of 4 rounds)');
+  log('========================================');
+  const bests = {};
+  for (let i = 0; i < models.length; i++) {
+    const sorted = [...allResults[i]].sort((a, b) => a - b);
+    const best = sorted[0];
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const all = allResults[i].map(v => v.toFixed(2)).join(', ');
+    bests[models[i].id] = { best, median };
+    log(`  ${models[i].id.padEnd(12)} best: ${best.toFixed(2)} ms  median: ${median.toFixed(2)} ms  [${all}]`);
+  }
+  log('');
+  log('  --- Speedups (using median) ---');
+  log(`  4MB  f16 vs f32: ${(bests['4MB f32'].median / bests['4MB f16'].median).toFixed(2)}x`);
+  log(`  10MB f16 vs f32: ${(bests['10MB f32'].median / bests['10MB f16'].median).toFixed(2)}x`);
+  log(`  10MB f16 vs 4MB f32: ${(bests['4MB f32'].median / bests['10MB f16'].median).toFixed(2)}x  (bigger model, same precision)`);
+  log('');
+  log('  --- Download sizes ---');
+  for (const m of models) log(`  ${m.id.padEnd(12)} ${m.size}`);
+  log('========================================');
+  log('done');
+} catch (e) {
+  log('ERROR: ' + e.message);
+  log(e.stack || '');
+}
+})();
+</script>
+</body>
+</html>
