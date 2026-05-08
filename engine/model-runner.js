@@ -44,7 +44,7 @@ export class ModelRunner {
    * @param {GPUBuffer} inputBuf - input in NHWC format
    * @returns {Object} output name -> Float32Array
    */
-  async run(graph, inputBuf, allWeights, debug = false) {
+  async run(graph, inputBuf, allWeights, debug = false, dumpAll = false) {
     const g = graph.graph;
     const w = graph.weights;
     const device = this.device;
@@ -773,6 +773,32 @@ export class ModelRunner {
         for (let j = 0; j < data.length; j++) { mn = Math.min(mn, data[j]); mx = Math.max(mx, data[j]); }
         console.log(`  node ${idx} ${g[idx].op}: '${name.substring(0,25)}' [${n}] min=${mn.toFixed(4)} max=${mx.toFixed(4)} first=[${data.slice(0,3).map(v=>v.toFixed(4)).join(',')}]`);
       }
+    }
+
+    // dumpAll: read back every intermediate tensor for layer-by-layer comparison.
+    // Fused ops (Conv+PRelu, fused_block) share buffers. Track the LAST node that
+    // wrote to each buffer so the HTML diff compares against the right ORT layer.
+    if (dumpAll) {
+      const allTensors = {};
+      const bufToLastIdx = new Map();
+      for (let idx = 0; idx < g.length; idx++) {
+        const name = g[idx].outputs[0];
+        const buf = tensors[name];
+        if (buf) bufToLastIdx.set(buf, idx);
+      }
+      const emitted = new Set();
+      for (const [buf, idx] of bufToLastIdx) {
+        if (emitted.has(buf)) continue;
+        emitted.add(buf);
+        const name = g[idx].outputs[0];
+        const n = buf.size / 4;
+        allTensors[idx] = {
+          name, op: g[idx].op,
+          shape: shapes[name] || [n],
+          data: await this._readBuffer(buf, n),
+        };
+      }
+      return allTensors;
     }
 
     // Read back outputs

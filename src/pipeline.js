@@ -20,15 +20,16 @@ const logLandmark = makeLogger('tracking', 2000);
  * Wraps the palm detection worker.
  */
 class PalmWorker {
-  constructor() {
+  constructor(workerUrl, label) {
+    this.label = label || 'ort';
     this.worker = new Worker(
-      workerUrlWithGates(new URL('./palm-worker.js', import.meta.url)),
+      workerUrlWithGates(workerUrl || new URL('./palm-worker.js', import.meta.url)),
       { type: 'module' }
     );
     registerWorkerForGateUpdates(this.worker);
     this.pendingResolve = null;
     this.worker.onmessage = (e) => this._onMessage(e);
-    this.worker.onerror = (e) => console.error('[PalmWorker] uncaught worker error:', e.message, e);
+    this.worker.onerror = (e) => console.error(`[PalmWorker:${this.label}] uncaught worker error:`, e.message, e);
   }
 
   init(modelUrl) {
@@ -38,12 +39,12 @@ class PalmWorker {
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {
-          console.error('[PalmWorker] reported error:', e.data.message);
+          console.error(`[PalmWorker:${this.label}] reported error:`, e.data.message);
           reject(new Error(e.data.message));
         }
       };
       this.worker.onerror = (e) => {
-        console.error('[PalmWorker] worker crashed:', e.message, e);
+        console.error(`[PalmWorker:${this.label}] worker crashed:`, e.message, e);
         reject(new Error(`Worker crashed: ${e.message}`));
       };
       this.worker.postMessage({ type: 'init', modelUrl });
@@ -177,7 +178,8 @@ const MAX_MISSES = 3;
 
 export class HandTracker {
   constructor() {
-    this.palmWorker = new PalmWorker();
+    this.palmWorker = new PalmWorker(new URL('./palm-worker.js', import.meta.url), 'ort');
+    this.palmWorkerWGSL = new PalmWorker(new URL('./palm-worker-wgsl.js', import.meta.url), 'wgsl');
     this.landmarkWorkers = [new LandmarkWorker(), new LandmarkWorker()];
     // Each slot carries the minimum state needed for identity tracking:
     //   - rect: ROI for next inference (derived from last-accepted landmarks)
@@ -203,9 +205,12 @@ export class HandTracker {
   }
 
   async init(onStatus) {
-    // Init all three workers sequentially (WebGPU EP requires it)
-    onStatus?.('Loading palm detection worker...');
+    onStatus?.('Loading palm detection worker (ORT)...');
     await this.palmWorker.init(PALM_MODEL_URL);
+
+    onStatus?.('Loading palm detection worker (WGSL shadow)...');
+    await this.palmWorkerWGSL.init();
+    this._wgslShadowBusy = false;
 
     onStatus?.('Loading landmark worker 0...');
     await this.landmarkWorkers[0].init(LANDMARK_MODEL_URL);
@@ -357,16 +362,21 @@ export class HandTracker {
         this._palmAttempts = (this._palmAttempts || 0) + 1;
         const attemptNum = this._palmAttempts;
         const t0 = performance.now();
-        const frame = new VideoFrame(video);
-        this.palmWorker.detect(frame).then(result => {
+        const frameOrt = new VideoFrame(video);
+        const frameWgsl = new VideoFrame(video);
+
+        const ortP = this.palmWorker.detect(frameOrt);
+        const wgslP = this.palmWorkerWGSL.detect(frameWgsl);
+
+        Promise.all([ortP, wgslP]).then(([ortResult, wgslResult]) => {
           this.palmDetecting = false;
           const ms = (performance.now() - t0).toFixed(1);
           const empty = this.slots.filter(s => !s.active).length;
-          console.log(`[palm-search] attempt #${attemptNum}: ${result.detections.length} det in ${ms}ms, ${empty} empty slot(s)`);
-          if (result.previewRGBA) this._lastPreview = result.previewRGBA;
-          if (result.detections.length > 0) {
-            logPalm(`[palm] ${result.detections.length} detections`);
-            this.pendingDetections = result;
+          const fmtDets = (dets) => dets.map(d => `(${(d.cx*100).toFixed(0)},${(d.cy*100).toFixed(0)} s=${d.score.toFixed(2)})`).join(' ');
+          console.log(`[palm-race #${attemptNum}] ORT: ${ortResult.detections.length} det [${fmtDets(ortResult.detections)}] | WGSL: ${wgslResult.detections.length} det [${fmtDets(wgslResult.detections)}] | ${ms}ms, ${empty} empty`);
+          if (ortResult.previewRGBA) this._lastPreview = ortResult.previewRGBA;
+          if (ortResult.detections.length > 0) {
+            this.pendingDetections = ortResult;
           }
         }).catch(() => { this.palmDetecting = false; });
       }

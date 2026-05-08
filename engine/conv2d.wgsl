@@ -184,16 +184,17 @@ fn main(
                 s += input[ic * stride + spatial_idx] * weights[w_base + (ic - in_c_start)];
             }
 
-            // Inline residual + activation + write
-            if (params.has_residual == 1u) {
-                s += residual[cur_oc * out_stride + oh * params.out_w + ow];
-            }
+            // Inline activation + residual + write
+            // Activation BEFORE residual: graph order is Conv -> Act -> Add
             if (params.has_prelu == 1u) {
                 if (s < 0.0) { s = s * prelu_slope[cur_oc]; }
             } else if (params.has_prelu == 2u) {
                 s = clamp(s, 0.0, 6.0);
             } else if (params.has_prelu == 3u) {
                 s = max(s, 0.0);
+            }
+            if (params.has_residual == 1u) {
+                s += residual[cur_oc * out_stride + oh * params.out_w + ow];
             }
             output[cur_oc * out_stride + oh * params.out_w + ow] = s;
         }
@@ -238,17 +239,18 @@ fn main(
     }
 
     // Shared epilogue for DW and general paths
+    // Activation BEFORE residual: graph order is Conv -> Act -> Add
     if (in_bounds) {
-        if (params.has_residual == 1u) {
-            let out_idx = oc * params.out_h * params.out_w + oh * params.out_w + ow;
-            sum += residual[out_idx];
-        }
         if (params.has_prelu == 1u) {
             if (sum < 0.0) { sum = sum * prelu_slope[oc]; }
         } else if (params.has_prelu == 2u) {
             sum = clamp(sum, 0.0, 6.0);
         } else if (params.has_prelu == 3u) {
             sum = max(sum, 0.0);
+        }
+        if (params.has_residual == 1u) {
+            let out_idx = oc * params.out_h * params.out_w + oh * params.out_w + ow;
+            sum += residual[out_idx];
         }
         let out_idx = oc * params.out_h * params.out_w + oh * params.out_w + ow;
         output[out_idx] = sum;

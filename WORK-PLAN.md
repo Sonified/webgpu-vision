@@ -395,6 +395,56 @@ Not reliably reproducible yet. Worth investigating next time it happens: check `
 
 Demo loads and renders the 3D scene, but nothing else happens -- no camera self-view, no hand tracking, no head tracking. Scene is completely inert. **Tabbing away to another browser tab and tabbing back fixes it every time** -- the `visibilitychange` handler's re-kick of the rAF + rVFC chains is sufficient to unstick it. Points to a race condition in the initial startup sequence. See [start_failure_log.md](start_failure_log.md) for full analysis.
 
+### RESOLVED: WGSL palm detection scores ~0.35 lower than ORT on live camera
+
+**Originally reported 2026-04-24. Root-caused and fixed 2026-05-08.**
+
+**The problem:** The WGSL inference engine produced dramatically lower palm detection scores than ORT on identical live camera frames. Head-to-head race on the same VideoFrame:
+- ORT: 2-4 detections, scores 0.85-0.93
+- WGSL: 0-1 detections, scores 0.52-0.59
+- WGSL also produced ghost detections (tiny 7x10 boxes at fixed locations) that ORT never saw
+
+**Root cause: activation/residual ordering bug in `engine/conv2d.wgsl`.**
+
+The conv2d shader's epilogue (both the 1x1 pointwise path and the shared DW/general path) applied the residual add BEFORE the activation function:
+
+```
+// WRONG (old):  PRelu(Conv(x) + bias + residual)
+sum += residual;  // residual first
+sum = PRelu(sum);  // activation second
+
+// CORRECT (fixed):  PRelu(Conv(x) + bias) + residual
+sum = PRelu(sum);  // activation first
+sum += residual;  // residual second
+```
+
+This only triggered in the FPN (feature pyramid network) lateral connections -- nodes 87-89 and 105-107 in the palm detection model -- where the graph pattern is Conv -> PRelu -> Add. The backbone uses Conv -> Add -> PRelu (activation after the residual add is a separate standalone op, so has_prelu=0 during the Conv+Add fusion) and was unaffected.
+
+The bug corrupted the multi-scale feature pyramid that feeds both detection heads, explaining the ~0.35 sigmoid score depression across the board.
+
+**How we found it:**
+
+1. Built `diagnostic/ort_dump.py` -- Python script that loads the ONNX model, modifies the graph to expose all 124 intermediate node outputs, runs inference on test images, saves every activation as `.npy` and `.bin` files with a JSON manifest.
+
+2. Added `dumpAll` mode to `engine/model-runner.js` -- reads back every GPU buffer after inference, tracking which node last wrote to each buffer (critical for fused ops where Conv+PRelu share a buffer).
+
+3. Built `diagnostic/wgsl-dump.html` -- browser page that loads the WGSL engine directly (no worker), runs inference on a test image, loads the ORT reference `.bin` files, and does element-wise comparison at every layer. Supports `?exact=1` to load the ORT reference NCHW input directly, eliminating any letterbox preprocessing differences.
+
+4. Drove it headless via `diagnostic/run-layer-diff.mjs` (Puppeteer + Chrome `--enable-unsafe-webgpu`).
+
+5. First run had false positives from comparing fused buffers against the wrong ORT layer (Conv+PRelu buffer vs ORT's Conv-only output). Fixed the dumpAll to use `bufToLastIdx` tracking so fused results compare against the correct ORT node.
+
+6. With exact input: **all 80 WGSL tensors matched ORT through node 88** (maxAbs < 0.0001). **First divergence at node 89 (Add)** -- the FPN lateral connection. Two-line swap in conv2d.wgsl fixed it. Post-fix: all layers match, final outputs maxAbs=0.000022.
+
+**Diagnostic tooling retained in `diagnostic/`:**
+- `ort_dump.py` -- Python ORT intermediate dump (run on any test image)
+- `wgsl-dump.html` -- Browser-side WGSL vs ORT layer diff
+- `run-layer-diff.mjs` -- Headless Puppeteer driver
+- `dumps/hand_000/` -- Reference activations for hand_000.png
+- `capture/` -- Webcam frame capture tool (built 28 test images in `images/test_images/hand_images/`)
+
+**Status:** Fix is on branch `wgsl-detection-lag`, not yet tested live. The head-to-head race wiring (ORT shadow worker) is still in `src/pipeline.js` for validation. Once confirmed live, the ORT shadow can be removed and the branch merged to main.
+
 ### Known issue: face detection tracking preview not cleaned up on toggle off
 
 When the face detection model is toggled off in the ball-toss demo, the small tracking preview window in the corner (showing the detected face region) is not cleaned up -- it stays on screen even after face tracking stops. Demo-level issue in `demos/ball-toss/index.html`. Fix: when face tracking is disabled, clear the preview canvas and hide the overlay element.
