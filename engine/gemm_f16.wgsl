@@ -14,7 +14,7 @@ struct GemmParams {
 @group(0) @binding(3) var<storage, read> bias: array<f16>;
 @group(0) @binding(4) var<storage, read_write> output: array<f16>;
 
-var<workgroup> shared_input: array<f16, 1024>;
+var<workgroup> shared_input: array<f16, 2048>;
 var<workgroup> shared_reduce: array<f16, 64>;
 
 @compute @workgroup_size(64, 1, 1)
@@ -30,7 +30,7 @@ fn main(
     let k_chunks = (K + 63u) / 64u;
     for (var c: u32 = 0u; c < k_chunks; c++) {
         let idx = c * 64u + tid;
-        if (idx < K && idx < 1024u) {
+        if (idx < K && idx < 2048u) {
             shared_input[idx] = input[idx];
         }
     }

@@ -415,7 +415,7 @@ import { log } from '../../src/log-gates.js';
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
 // ============================================================
-const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'landmark', faceRoi: 'auto', interpolation: '1' };
+const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'landmark', faceRoi: 'auto', interpolation: '1', handModel: '4mb-f32' };
 function getSetting(key) { const v = localStorage.getItem(key); return v !== null ? v : DEFAULTS[key]; }
 function setSetting(key, val) { localStorage.setItem(key, val); }
 
@@ -474,6 +474,7 @@ const numHandsSelect = document.getElementById('num-hands-select');
 backendSelect.value = getSetting('backend');
 parallaxSelect.value = getSetting('parallax');
 numHandsSelect.value = getSetting('numHands');
+document.getElementById('model-select').value = getSetting('handModel');
 
 // ============================================================
 // 3D Scene Setup
@@ -720,10 +721,11 @@ document.getElementById('model-select').addEventListener('change', async (e) => 
   sel.disabled = true;
   try {
     await gpuHandTracker.switchModel(variant);
+    setSetting('handModel', variant);
     log('lifecycle', `[model-select] switched to ${variant}`);
   } catch (err) {
     console.error('[model-select] switch failed:', err);
-    sel.value = '4mb-f32';
+    sel.value = getSetting('handModel');
   } finally {
     sel.disabled = false;
   }
@@ -1519,6 +1521,21 @@ function handleHandResult(hands, opts = {}) {
           ` | ref=${refPalmSize[h].toFixed(2)} Z=${handZPos[h].toFixed(3)}`
         );
       }
+    } else {
+      // No world landmarks (e.g. 10mb sparse model): estimate Z from
+      // screen-space palm size using a fixed average palm width (~8.5cm).
+      const PALM_WIDTH_M = 0.085;
+      const PALM_HEIGHT_M = 0.10;
+      const imN = filtered[5], pmN = filtered[17], wN = filtered[0];
+      const screenW = Math.hypot(imN.x - pmN.x, imN.y - pmN.y);
+      const midX = (imN.x + pmN.x) * 0.5, midY = (imN.y + pmN.y) * 0.5;
+      const screenH = Math.hypot(wN.x - midX, wN.y - midY);
+      const ratioW = screenW / PALM_WIDTH_M;
+      const ratioH = screenH / PALM_HEIGHT_M;
+      const bestRatio = Math.max(ratioW, ratioH);
+      if (refPalmSize[h] === 0) refPalmSize[h] = bestRatio;
+      const rawHandZ = -((bestRatio / refPalmSize[h]) - 1);
+      handZPos[h] = handZFilters[h].filter(rawHandZ, now);
     }
     handConf[h] = entry.handFlag || 0;
 
@@ -1843,6 +1860,11 @@ async function initWebGPUBackend(silent = false) {
       if (Number.isFinite(savedConf)) gpuHandTracker.handFlagThreshold = savedConf;
       setStatus('Loading WebGPU hand tracker...');
       await gpuHandTracker.init(setStatus);
+      const savedModel = getSetting('handModel');
+      if (savedModel && savedModel !== '4mb-f32') {
+        setStatus(`Switching to ${savedModel}...`);
+        await gpuHandTracker.switchModel(savedModel);
+      }
       setStatus('Loading WebGPU face tracker...');
       await gpuFaceTracker.init(setStatus);
       gpuReady = true;
@@ -1880,7 +1902,8 @@ const _bench = {
         ? this.handCounts.reduce((a,b) => a+b,0) / this.handCounts.length
         : 0;
       const handsTag = hc === 0 ? '0h' : hc >= 1.95 ? '2h' : hc <= 0.05 ? '0h' : `${hc.toFixed(1)}h`;
-      log('bench', `[BENCH] ${backendTag} Hand (${handsTag}): ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      const modelTag = getSetting('handModel') || '4mb-f32';
+      log('bench', `[BENCH] ${backendTag} Hand[${modelTag}] (${handsTag}): ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);

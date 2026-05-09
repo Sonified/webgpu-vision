@@ -223,8 +223,9 @@ async function loadModel(variant) {
     castBindGroup = null;
   }
 
-  runner = new ModelRunner(device, P, W, allWeightsBuf, isF16 ? { f16: true } : {});
-  const outputs = await runner.compile(graph, modelInputBuf, allWeights);
+  const newRunner = new ModelRunner(device, P, W, allWeightsBuf, isF16 ? { f16: true } : {});
+  const outputs = await newRunner.compile(graph, modelInputBuf, allWeights);
+  runner = newRunner;
 
   outputNames = {};
   for (const [name, data] of Object.entries(outputs)) {
