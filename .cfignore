@@ -1,0 +1,58 @@
+# Cloudflare Pages deploy ignore
+# Only deploy what the browser actually needs
+
+# Git & CI
+.git/
+.github/
+.claude/
+.vscode/
+
+# Dev tooling
+node_modules/
+dist/
+.wrangler/
+.session-timer
+
+# Documentation / planning (not served)
+CLAUDE.md
+WORK-PLAN.md
+ARCHITECTURE.md
+KNOWN-ISSUES.md
+PRELU_DECOMPOSITION.md
+RESEARCH-*.md
+README.md
+
+# Archived models (~180MB)
+models/_archive/
+
+# Source ONNX files (browser uses .json/.bin, not .onnx)
+models/hand/*/source/
+models/face/*/source/
+
+# Diagnostic & benchmark tooling
+diagnostic/
+benchmark/
+engine/test-*.html
+engine/bench-*.html
+engine/profile-*.html
+engine/onnx_to_json.py
+
+# AR experiment
+ar/
+
+# Reference Python implementations
+reference/
+
+# ORT vendor copies (top-level dupes used by test-rtmpose only)
+vendor/ort-wasm-simd-threaded.jsep.*
+
+# Test images
+images/test_images/
+
+# Package files (not needed for static deploy)
+package.json
+package-lock.json
+vite.config.js
+
+# QR codes
+qr-*.png

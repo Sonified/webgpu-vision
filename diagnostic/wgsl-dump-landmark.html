@@ -57,8 +57,8 @@ async function run() {
   addLog('WebGPU ready');
 
   // Load model
-  const graph = await (await fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/hand_landmark_large/hand_landmark_large.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_large/hand_landmark_large.bin')).arrayBuffer());
   addLog(`Model loaded: ${graph.graph.length} ops, ${Object.keys(graph.weights).length} weights`);
 
   // Create weight buffers

@@ -1,30 +1,68 @@
-name: Deploy to GitHub Pages
+name: Deploy to Cloudflare Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Stage production files
+        run: |
+          mkdir -p /tmp/deploy
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.claude/' \
+            --exclude='.vscode/' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='.wrangler/' \
+            --exclude='.session-timer' \
+            --exclude='CLAUDE.md' \
+            --exclude='WORK-PLAN.md' \
+            --exclude='ARCHITECTURE.md' \
+            --exclude='KNOWN-ISSUES.md' \
+            --exclude='PRELU_DECOMPOSITION.md' \
+            --exclude='RESEARCH-*.md' \
+            --exclude='README.md' \
+            --exclude='models/_archive/' \
+            --exclude='*/source/' \
+            --exclude='diagnostic/' \
+            --exclude='benchmark/' \
+            --exclude='engine/test-*.html' \
+            --exclude='engine/bench-*.html' \
+            --exclude='engine/profile-*.html' \
+            --exclude='engine/onnx_to_json.py' \
+            --exclude='ar/' \
+            --exclude='reference/' \
+            --exclude='vendor/ort-wasm-simd-threaded.jsep.*' \
+            --exclude='images/test_images/' \
+            --exclude='package.json' \
+            --exclude='package-lock.json' \
+            --exclude='vite.config.js' \
+            --exclude='qr-*.png' \
+            --exclude='.cfignore' \
+            --exclude='.gitignore' \
+            --exclude='*.onnx' \
+            --exclude='*.onnx.gz' \
+            --exclude='*.tflite' \
+            --exclude='*.zip' \
+            --exclude='*.py' \
+            --exclude='.DS_Store' \
+            ./ /tmp/deploy/
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: .
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy /tmp/deploy --project-name=webgpu-vision

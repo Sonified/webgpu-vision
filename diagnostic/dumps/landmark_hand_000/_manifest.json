@@ -1,0 +1,1273 @@
+{
+  "image": "hand_000.png",
+  "model": "hand_landmark_sparse",
+  "layers": [
+    {
+      "idx": 95,
+      "name": "xyz_x21",
+      "shape": [
+        1,
+        63
+      ],
+      "min": -32.167606353759766,
+      "max": 156.10678100585938,
+      "bin": "095_xyz_x21.bin"
+    },
+    {
+      "idx": 96,
+      "name": "hand_score",
+      "shape": [
+        1,
+        1
+      ],
+      "min": 0.10786724090576172,
+      "max": 0.10786724090576172,
+      "bin": "096_hand_score.bin"
+    },
+    {
+      "idx": 98,
+      "name": "lefthand_0_or_righthand_1",
+      "shape": [
+        1,
+        1
+      ],
+      "min": 0.0,
+      "max": 0.0,
+      "bin": "098_lefthand_0_or_righthand_1.bin"
+    },
+    {
+      "idx": 0,
+      "name": "Conv__227:0",
+      "shape": [
+        1,
+        24,
+        112,
+        112
+      ],
+      "min": -18.92755889892578,
+      "max": 17.139097213745117,
+      "bin": "000_Conv__227_0.bin"
+    },
+    {
+      "idx": 1,
+      "name": "model_1/model/tf.nn.relu6/Relu6_model_1/model/batch_normalization/FusedBatchNormV3_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D_model_1/model/conv2d/Conv2D:0",
+      "shape": [
+        1,
+        24,
+        112,
+        112
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "001_model_1_model_tf.nn.relu6_Relu6_model_1_model_batch_normalization_FusedBatchNorm.bin"
+    },
+    {
+      "idx": 2,
+      "name": "Conv__228:0",
+      "shape": [
+        1,
+        24,
+        112,
+        112
+      ],
+      "min": -31.209495544433594,
+      "max": 58.623451232910156,
+      "bin": "002_Conv__228_0.bin"
+    },
+    {
+      "idx": 3,
+      "name": "model_1/model/tf.nn.relu6_1/Relu6_model_1/model/batch_normalization_1/FusedBatchNormV3_model_1/model/depthwise_conv2d/depthwise_model_1/model/conv2d_5/Conv2D:0",
+      "shape": [
+        1,
+        24,
+        112,
+        112
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "003_model_1_model_tf.nn.relu6_1_Relu6_model_1_model_batch_normalization_1_FusedBatch.bin"
+    },
+    {
+      "idx": 4,
+      "name": "Conv__229:0",
+      "shape": [
+        1,
+        16,
+        112,
+        112
+      ],
+      "min": -11.367392539978027,
+      "max": 19.307592391967773,
+      "bin": "004_Conv__229_0.bin"
+    },
+    {
+      "idx": 5,
+      "name": "Conv__230:0",
+      "shape": [
+        1,
+        64,
+        112,
+        112
+      ],
+      "min": -22.642324447631836,
+      "max": 23.447519302368164,
+      "bin": "005_Conv__230_0.bin"
+    },
+    {
+      "idx": 6,
+      "name": "model_1/model/tf.nn.relu6_2/Relu6_model_1/model/batch_normalization_3/FusedBatchNormV3_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise_model_1/model/conv2d_2/Conv2D:0",
+      "shape": [
+        1,
+        64,
+        112,
+        112
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "006_model_1_model_tf.nn.relu6_2_Relu6_model_1_model_batch_normalization_3_FusedBatch.bin"
+    },
+    {
+      "idx": 7,
+      "name": "Conv__231:0",
+      "shape": [
+        1,
+        64,
+        56,
+        56
+      ],
+      "min": -29.58533477783203,
+      "max": 15.03120231628418,
+      "bin": "007_Conv__231_0.bin"
+    },
+    {
+      "idx": 8,
+      "name": "model_1/model/tf.nn.relu6_3/Relu6_model_1/model/batch_normalization_4/FusedBatchNormV3_model_1/model/depthwise_conv2d_1/depthwise:0",
+      "shape": [
+        1,
+        64,
+        56,
+        56
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "008_model_1_model_tf.nn.relu6_3_Relu6_model_1_model_batch_normalization_4_FusedBatch.bin"
+    },
+    {
+      "idx": 9,
+      "name": "Conv__232:0",
+      "shape": [
+        1,
+        24,
+        56,
+        56
+      ],
+      "min": -13.127060890197754,
+      "max": 16.356338500976562,
+      "bin": "009_Conv__232_0.bin"
+    },
+    {
+      "idx": 10,
+      "name": "Conv__235:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": -19.351655960083008,
+      "max": 15.80624008178711,
+      "bin": "010_Conv__235_0.bin"
+    },
+    {
+      "idx": 11,
+      "name": "model_1/model/tf.nn.relu6_4/Relu6_model_1/model/batch_normalization_6/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_4/Conv2D:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "011_model_1_model_tf.nn.relu6_4_Relu6_model_1_model_batch_normalization_6_FusedBatch.bin"
+    },
+    {
+      "idx": 12,
+      "name": "Conv__236:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": -24.0771541595459,
+      "max": 29.035688400268555,
+      "bin": "012_Conv__236_0.bin"
+    },
+    {
+      "idx": 13,
+      "name": "model_1/model/tf.nn.relu6_5/Relu6_model_1/model/batch_normalization_7/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/depthwise_conv2d_2/depthwise:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "013_model_1_model_tf.nn.relu6_5_Relu6_model_1_model_batch_normalization_7_FusedBatch.bin"
+    },
+    {
+      "idx": 14,
+      "name": "Conv__237:0",
+      "shape": [
+        1,
+        24,
+        56,
+        56
+      ],
+      "min": -10.901662826538086,
+      "max": 12.078349113464355,
+      "bin": "014_Conv__237_0.bin"
+    },
+    {
+      "idx": 15,
+      "name": "model_1/model/tf.__operators__.add/AddV2:0",
+      "shape": [
+        1,
+        24,
+        56,
+        56
+      ],
+      "min": -12.091720581054688,
+      "max": 17.076250076293945,
+      "bin": "015_model_1_model_tf.__operators__.add_AddV2_0.bin"
+    },
+    {
+      "idx": 16,
+      "name": "Conv__238:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": -16.113380432128906,
+      "max": 34.39064025878906,
+      "bin": "016_Conv__238_0.bin"
+    },
+    {
+      "idx": 17,
+      "name": "model_1/model/tf.nn.relu6_6/Relu6_model_1/model/batch_normalization_9/FusedBatchNormV3_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise_model_1/model/conv2d_6/Conv2D:0",
+      "shape": [
+        1,
+        144,
+        56,
+        56
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "017_model_1_model_tf.nn.relu6_6_Relu6_model_1_model_batch_normalization_9_FusedBatch.bin"
+    },
+    {
+      "idx": 18,
+      "name": "Conv__239:0",
+      "shape": [
+        1,
+        144,
+        28,
+        28
+      ],
+      "min": -14.184255599975586,
+      "max": 18.382888793945312,
+      "bin": "018_Conv__239_0.bin"
+    },
+    {
+      "idx": 19,
+      "name": "model_1/model/tf.nn.relu6_7/Relu6_model_1/model/batch_normalization_10/FusedBatchNormV3_model_1/model/depthwise_conv2d_3/depthwise:0",
+      "shape": [
+        1,
+        144,
+        28,
+        28
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "019_model_1_model_tf.nn.relu6_7_Relu6_model_1_model_batch_normalization_10_FusedBatc.bin"
+    },
+    {
+      "idx": 20,
+      "name": "Conv__240:0",
+      "shape": [
+        1,
+        40,
+        28,
+        28
+      ],
+      "min": -12.094720840454102,
+      "max": 16.55483627319336,
+      "bin": "020_Conv__240_0.bin"
+    },
+    {
+      "idx": 21,
+      "name": "Conv__243:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": -14.045793533325195,
+      "max": 18.504823684692383,
+      "bin": "021_Conv__243_0.bin"
+    },
+    {
+      "idx": 22,
+      "name": "model_1/model/tf.nn.relu6_8/Relu6_model_1/model/batch_normalization_12/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_8/Conv2D:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "022_model_1_model_tf.nn.relu6_8_Relu6_model_1_model_batch_normalization_12_FusedBatc.bin"
+    },
+    {
+      "idx": 23,
+      "name": "Conv__244:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": -17.081567764282227,
+      "max": 21.237957000732422,
+      "bin": "023_Conv__244_0.bin"
+    },
+    {
+      "idx": 24,
+      "name": "model_1/model/tf.nn.relu6_9/Relu6_model_1/model/batch_normalization_13/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/depthwise_conv2d_4/depthwise:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "024_model_1_model_tf.nn.relu6_9_Relu6_model_1_model_batch_normalization_13_FusedBatc.bin"
+    },
+    {
+      "idx": 25,
+      "name": "Conv__245:0",
+      "shape": [
+        1,
+        40,
+        28,
+        28
+      ],
+      "min": -9.526238441467285,
+      "max": 12.892788887023926,
+      "bin": "025_Conv__245_0.bin"
+    },
+    {
+      "idx": 26,
+      "name": "model_1/model/tf.__operators__.add_1/AddV2:0",
+      "shape": [
+        1,
+        40,
+        28,
+        28
+      ],
+      "min": -19.291889190673828,
+      "max": 17.06531524658203,
+      "bin": "026_model_1_model_tf.__operators__.add_1_AddV2_0.bin"
+    },
+    {
+      "idx": 27,
+      "name": "Conv__246:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": -16.003894805908203,
+      "max": 23.197277069091797,
+      "bin": "027_Conv__246_0.bin"
+    },
+    {
+      "idx": 28,
+      "name": "model_1/model/tf.nn.relu6_10/Relu6_model_1/model/batch_normalization_15/FusedBatchNormV3_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise_model_1/model/conv2d_10/Conv2D:0",
+      "shape": [
+        1,
+        240,
+        28,
+        28
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "028_model_1_model_tf.nn.relu6_10_Relu6_model_1_model_batch_normalization_15_FusedBat.bin"
+    },
+    {
+      "idx": 29,
+      "name": "Conv__247:0",
+      "shape": [
+        1,
+        240,
+        14,
+        14
+      ],
+      "min": -14.561174392700195,
+      "max": 10.205961227416992,
+      "bin": "029_Conv__247_0.bin"
+    },
+    {
+      "idx": 30,
+      "name": "model_1/model/tf.nn.relu6_11/Relu6_model_1/model/batch_normalization_16/FusedBatchNormV3_model_1/model/depthwise_conv2d_5/depthwise:0",
+      "shape": [
+        1,
+        240,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "030_model_1_model_tf.nn.relu6_11_Relu6_model_1_model_batch_normalization_16_FusedBat.bin"
+    },
+    {
+      "idx": 31,
+      "name": "Conv__248:0",
+      "shape": [
+        1,
+        80,
+        14,
+        14
+      ],
+      "min": -14.063252449035645,
+      "max": 18.660032272338867,
+      "bin": "031_Conv__248_0.bin"
+    },
+    {
+      "idx": 32,
+      "name": "Conv__251:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -11.37271785736084,
+      "max": 21.17244529724121,
+      "bin": "032_Conv__251_0.bin"
+    },
+    {
+      "idx": 33,
+      "name": "model_1/model/tf.nn.relu6_12/Relu6_model_1/model/batch_normalization_18/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_12/Conv2D:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "033_model_1_model_tf.nn.relu6_12_Relu6_model_1_model_batch_normalization_18_FusedBat.bin"
+    },
+    {
+      "idx": 34,
+      "name": "Conv__252:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -16.432653427124023,
+      "max": 14.452430725097656,
+      "bin": "034_Conv__252_0.bin"
+    },
+    {
+      "idx": 35,
+      "name": "model_1/model/tf.nn.relu6_13/Relu6_model_1/model/batch_normalization_19/FusedBatchNormV3_model_1/model/depthwise_conv2d_6/depthwise_model_1/model/depthwise_conv2d_8/depthwise:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "035_model_1_model_tf.nn.relu6_13_Relu6_model_1_model_batch_normalization_19_FusedBat.bin"
+    },
+    {
+      "idx": 36,
+      "name": "Conv__253:0",
+      "shape": [
+        1,
+        80,
+        14,
+        14
+      ],
+      "min": -11.755315780639648,
+      "max": 18.2069149017334,
+      "bin": "036_Conv__253_0.bin"
+    },
+    {
+      "idx": 37,
+      "name": "model_1/model/tf.__operators__.add_2/AddV2:0",
+      "shape": [
+        1,
+        80,
+        14,
+        14
+      ],
+      "min": -16.478038787841797,
+      "max": 22.199125289916992,
+      "bin": "037_model_1_model_tf.__operators__.add_2_AddV2_0.bin"
+    },
+    {
+      "idx": 38,
+      "name": "Conv__256:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -8.049459457397461,
+      "max": 17.56573486328125,
+      "bin": "038_Conv__256_0.bin"
+    },
+    {
+      "idx": 39,
+      "name": "model_1/model/tf.nn.relu6_14/Relu6_model_1/model/batch_normalization_21/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_14/Conv2D:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "039_model_1_model_tf.nn.relu6_14_Relu6_model_1_model_batch_normalization_21_FusedBat.bin"
+    },
+    {
+      "idx": 40,
+      "name": "Conv__257:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -16.982376098632812,
+      "max": 14.58932113647461,
+      "bin": "040_Conv__257_0.bin"
+    },
+    {
+      "idx": 41,
+      "name": "model_1/model/tf.nn.relu6_15/Relu6_model_1/model/batch_normalization_22/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/depthwise_conv2d_7/depthwise:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "041_model_1_model_tf.nn.relu6_15_Relu6_model_1_model_batch_normalization_22_FusedBat.bin"
+    },
+    {
+      "idx": 42,
+      "name": "Conv__258:0",
+      "shape": [
+        1,
+        80,
+        14,
+        14
+      ],
+      "min": -17.493650436401367,
+      "max": 19.7940673828125,
+      "bin": "042_Conv__258_0.bin"
+    },
+    {
+      "idx": 43,
+      "name": "model_1/model/tf.__operators__.add_3/AddV2:0",
+      "shape": [
+        1,
+        80,
+        14,
+        14
+      ],
+      "min": -26.396602630615234,
+      "max": 22.314434051513672,
+      "bin": "043_model_1_model_tf.__operators__.add_3_AddV2_0.bin"
+    },
+    {
+      "idx": 44,
+      "name": "Conv__259:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -10.836499214172363,
+      "max": 23.93560791015625,
+      "bin": "044_Conv__259_0.bin"
+    },
+    {
+      "idx": 45,
+      "name": "model_1/model/tf.nn.relu6_16/Relu6_model_1/model/batch_normalization_24/FusedBatchNormV3_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise_model_1/model/conv2d_16/Conv2D:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "045_model_1_model_tf.nn.relu6_16_Relu6_model_1_model_batch_normalization_24_FusedBat.bin"
+    },
+    {
+      "idx": 46,
+      "name": "Conv__260:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": -21.46310043334961,
+      "max": 20.187698364257812,
+      "bin": "046_Conv__260_0.bin"
+    },
+    {
+      "idx": 47,
+      "name": "model_1/model/tf.nn.relu6_17/Relu6_model_1/model/batch_normalization_25/FusedBatchNormV3_model_1/model/depthwise_conv2d_8/depthwise:0",
+      "shape": [
+        1,
+        480,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "047_model_1_model_tf.nn.relu6_17_Relu6_model_1_model_batch_normalization_25_FusedBat.bin"
+    },
+    {
+      "idx": 48,
+      "name": "Conv__261:0",
+      "shape": [
+        1,
+        112,
+        14,
+        14
+      ],
+      "min": -19.558683395385742,
+      "max": 21.05320167541504,
+      "bin": "048_Conv__261_0.bin"
+    },
+    {
+      "idx": 49,
+      "name": "Conv__264:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": -10.281067848205566,
+      "max": 18.768110275268555,
+      "bin": "049_Conv__264_0.bin"
+    },
+    {
+      "idx": 50,
+      "name": "model_1/model/tf.nn.relu6_18/Relu6_model_1/model/batch_normalization_27/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_18/Conv2D:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "050_model_1_model_tf.nn.relu6_18_Relu6_model_1_model_batch_normalization_27_FusedBat.bin"
+    },
+    {
+      "idx": 51,
+      "name": "Conv__265:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": -22.34784507751465,
+      "max": 28.23680305480957,
+      "bin": "051_Conv__265_0.bin"
+    },
+    {
+      "idx": 52,
+      "name": "model_1/model/tf.nn.relu6_19/Relu6_model_1/model/batch_normalization_28/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/depthwise_conv2d_9/depthwise:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "052_model_1_model_tf.nn.relu6_19_Relu6_model_1_model_batch_normalization_28_FusedBat.bin"
+    },
+    {
+      "idx": 53,
+      "name": "Conv__266:0",
+      "shape": [
+        1,
+        112,
+        14,
+        14
+      ],
+      "min": -25.458942413330078,
+      "max": 36.070613861083984,
+      "bin": "053_Conv__266_0.bin"
+    },
+    {
+      "idx": 54,
+      "name": "model_1/model/tf.__operators__.add_4/AddV2:0",
+      "shape": [
+        1,
+        112,
+        14,
+        14
+      ],
+      "min": -24.13182258605957,
+      "max": 34.3599967956543,
+      "bin": "054_model_1_model_tf.__operators__.add_4_AddV2_0.bin"
+    },
+    {
+      "idx": 55,
+      "name": "Conv__269:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": -11.166529655456543,
+      "max": 27.324209213256836,
+      "bin": "055_Conv__269_0.bin"
+    },
+    {
+      "idx": 56,
+      "name": "model_1/model/tf.nn.relu6_20/Relu6_model_1/model/batch_normalization_30/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_20/Conv2D:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "056_model_1_model_tf.nn.relu6_20_Relu6_model_1_model_batch_normalization_30_FusedBat.bin"
+    },
+    {
+      "idx": 57,
+      "name": "Conv__270:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": -16.771615982055664,
+      "max": 37.46579360961914,
+      "bin": "057_Conv__270_0.bin"
+    },
+    {
+      "idx": 58,
+      "name": "model_1/model/tf.nn.relu6_21/Relu6_model_1/model/batch_normalization_31/FusedBatchNormV3_model_1/model/depthwise_conv2d_10/depthwise_model_1/model/depthwise_conv2d_11/depthwise:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "058_model_1_model_tf.nn.relu6_21_Relu6_model_1_model_batch_normalization_31_FusedBat.bin"
+    },
+    {
+      "idx": 59,
+      "name": "Conv__271:0",
+      "shape": [
+        1,
+        112,
+        14,
+        14
+      ],
+      "min": -30.872299194335938,
+      "max": 35.517696380615234,
+      "bin": "059_Conv__271_0.bin"
+    },
+    {
+      "idx": 60,
+      "name": "model_1/model/tf.__operators__.add_5/AddV2:0",
+      "shape": [
+        1,
+        112,
+        14,
+        14
+      ],
+      "min": -43.90473937988281,
+      "max": 60.71469497680664,
+      "bin": "060_model_1_model_tf.__operators__.add_5_AddV2_0.bin"
+    },
+    {
+      "idx": 61,
+      "name": "Conv__272:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": -14.96794319152832,
+      "max": 27.627870559692383,
+      "bin": "061_Conv__272_0.bin"
+    },
+    {
+      "idx": 62,
+      "name": "model_1/model/tf.nn.relu6_22/Relu6_model_1/model/batch_normalization_33/FusedBatchNormV3_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise_model_1/model/conv2d_22/Conv2D:0",
+      "shape": [
+        1,
+        672,
+        14,
+        14
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "062_model_1_model_tf.nn.relu6_22_Relu6_model_1_model_batch_normalization_33_FusedBat.bin"
+    },
+    {
+      "idx": 63,
+      "name": "Conv__273:0",
+      "shape": [
+        1,
+        672,
+        7,
+        7
+      ],
+      "min": -33.26602554321289,
+      "max": 22.654499053955078,
+      "bin": "063_Conv__273_0.bin"
+    },
+    {
+      "idx": 64,
+      "name": "model_1/model/tf.nn.relu6_23/Relu6_model_1/model/batch_normalization_34/FusedBatchNormV3_model_1/model/depthwise_conv2d_11/depthwise:0",
+      "shape": [
+        1,
+        672,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "064_model_1_model_tf.nn.relu6_23_Relu6_model_1_model_batch_normalization_34_FusedBat.bin"
+    },
+    {
+      "idx": 65,
+      "name": "Conv__274:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -28.038352966308594,
+      "max": 36.35970687866211,
+      "bin": "065_Conv__274_0.bin"
+    },
+    {
+      "idx": 66,
+      "name": "Conv__277:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -10.065773010253906,
+      "max": 21.04963493347168,
+      "bin": "066_Conv__277_0.bin"
+    },
+    {
+      "idx": 67,
+      "name": "model_1/model/tf.nn.relu6_24/Relu6_model_1/model/batch_normalization_36/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_24/Conv2D:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "067_model_1_model_tf.nn.relu6_24_Relu6_model_1_model_batch_normalization_36_FusedBat.bin"
+    },
+    {
+      "idx": 68,
+      "name": "Conv__278:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -36.75759506225586,
+      "max": 28.177734375,
+      "bin": "068_Conv__278_0.bin"
+    },
+    {
+      "idx": 69,
+      "name": "model_1/model/tf.nn.relu6_25/Relu6_model_1/model/batch_normalization_37/FusedBatchNormV3_model_1/model/depthwise_conv2d_12/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "069_model_1_model_tf.nn.relu6_25_Relu6_model_1_model_batch_normalization_37_FusedBat.bin"
+    },
+    {
+      "idx": 70,
+      "name": "Conv__279:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -45.97383117675781,
+      "max": 41.56707763671875,
+      "bin": "070_Conv__279_0.bin"
+    },
+    {
+      "idx": 71,
+      "name": "model_1/model/tf.__operators__.add_6/AddV2:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -54.52863311767578,
+      "max": 67.8894271850586,
+      "bin": "071_model_1_model_tf.__operators__.add_6_AddV2_0.bin"
+    },
+    {
+      "idx": 72,
+      "name": "Conv__282:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -14.60599136352539,
+      "max": 20.959938049316406,
+      "bin": "072_Conv__282_0.bin"
+    },
+    {
+      "idx": 73,
+      "name": "model_1/model/tf.nn.relu6_26/Relu6_model_1/model/batch_normalization_39/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_26/Conv2D:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "073_model_1_model_tf.nn.relu6_26_Relu6_model_1_model_batch_normalization_39_FusedBat.bin"
+    },
+    {
+      "idx": 74,
+      "name": "Conv__283:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -41.86495590209961,
+      "max": 20.160951614379883,
+      "bin": "074_Conv__283_0.bin"
+    },
+    {
+      "idx": 75,
+      "name": "model_1/model/tf.nn.relu6_27/Relu6_model_1/model/batch_normalization_40/FusedBatchNormV3_model_1/model/depthwise_conv2d_13/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "075_model_1_model_tf.nn.relu6_27_Relu6_model_1_model_batch_normalization_40_FusedBat.bin"
+    },
+    {
+      "idx": 76,
+      "name": "Conv__284:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -61.957054138183594,
+      "max": 68.179931640625,
+      "bin": "076_Conv__284_0.bin"
+    },
+    {
+      "idx": 77,
+      "name": "model_1/model/tf.__operators__.add_7/AddV2:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -79.59640502929688,
+      "max": 72.06283569335938,
+      "bin": "077_model_1_model_tf.__operators__.add_7_AddV2_0.bin"
+    },
+    {
+      "idx": 78,
+      "name": "Conv__287:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -18.082683563232422,
+      "max": 22.23689079284668,
+      "bin": "078_Conv__287_0.bin"
+    },
+    {
+      "idx": 79,
+      "name": "model_1/model/tf.nn.relu6_28/Relu6_model_1/model/batch_normalization_42/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_28/Conv2D:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "079_model_1_model_tf.nn.relu6_28_Relu6_model_1_model_batch_normalization_42_FusedBat.bin"
+    },
+    {
+      "idx": 80,
+      "name": "Conv__288:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -49.75574493408203,
+      "max": 20.47123908996582,
+      "bin": "080_Conv__288_0.bin"
+    },
+    {
+      "idx": 81,
+      "name": "model_1/model/tf.nn.relu6_29/Relu6_model_1/model/batch_normalization_43/FusedBatchNormV3_model_1/model/depthwise_conv2d_14/depthwise_model_1/model/depthwise_conv2d_15/depthwise:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "081_model_1_model_tf.nn.relu6_29_Relu6_model_1_model_batch_normalization_43_FusedBat.bin"
+    },
+    {
+      "idx": 82,
+      "name": "Conv__289:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -96.59529113769531,
+      "max": 68.9067611694336,
+      "bin": "082_Conv__289_0.bin"
+    },
+    {
+      "idx": 83,
+      "name": "model_1/model/tf.__operators__.add_8/AddV2:0",
+      "shape": [
+        1,
+        192,
+        7,
+        7
+      ],
+      "min": -102.17427825927734,
+      "max": 72.99584197998047,
+      "bin": "083_model_1_model_tf.__operators__.add_8_AddV2_0.bin"
+    },
+    {
+      "idx": 84,
+      "name": "Conv__290:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -55.48908233642578,
+      "max": 71.42545318603516,
+      "bin": "084_Conv__290_0.bin"
+    },
+    {
+      "idx": 85,
+      "name": "model_1/model/tf.nn.relu6_30/Relu6_model_1/model/batch_normalization_45/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise_model_1/model/conv2d_30/Conv2D:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "085_model_1_model_tf.nn.relu6_30_Relu6_model_1_model_batch_normalization_45_FusedBat.bin"
+    },
+    {
+      "idx": 86,
+      "name": "Conv__291:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": -52.047325134277344,
+      "max": 113.00370025634766,
+      "bin": "086_Conv__291_0.bin"
+    },
+    {
+      "idx": 87,
+      "name": "model_1/model/tf.nn.relu6_31/Relu6_model_1/model/batch_normalization_46/FusedBatchNormV3_model_1/model/depthwise_conv2d_15/depthwise:0",
+      "shape": [
+        1,
+        1152,
+        7,
+        7
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "087_model_1_model_tf.nn.relu6_31_Relu6_model_1_model_batch_normalization_46_FusedBat.bin"
+    },
+    {
+      "idx": 88,
+      "name": "model_1/model/tf.math.reduce_mean/Mean:0",
+      "shape": [
+        1,
+        1152,
+        1,
+        1
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "088_model_1_model_tf.math.reduce_mean_Mean_0.bin"
+    },
+    {
+      "idx": 89,
+      "name": "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot/Reshape:0",
+      "shape": [
+        1,
+        1152
+      ],
+      "min": 0.0,
+      "max": 6.0,
+      "bin": "089_model_1_model_conv_handedness_MatMul_model_1_model_conv_handedness_BiasAdd_dense.bin"
+    },
+    {
+      "idx": 90,
+      "name": "model_1/model/conv_handflag/MatMul_model_1/model/conv_handflag/BiasAdd_dense/Tensordot:0",
+      "shape": [
+        1,
+        1
+      ],
+      "min": -2.1200337409973145,
+      "max": -2.1200337409973145,
+      "bin": "090_model_1_model_conv_handflag_MatMul_model_1_model_conv_handflag_BiasAdd_dense_Ten.bin"
+    },
+    {
+      "idx": 91,
+      "name": "model_1/model/conv_handedness/MatMul_model_1/model/conv_handedness/BiasAdd_dense/Tensordot:0",
+      "shape": [
+        1,
+        1
+      ],
+      "min": -2.4565982818603516,
+      "max": -2.4565982818603516,
+      "bin": "091_model_1_model_conv_handedness_MatMul_model_1_model_conv_handedness_BiasAdd_dense.bin"
+    },
+    {
+      "idx": 92,
+      "name": "Identity_dense/Tensordot:0",
+      "shape": [
+        1,
+        63
+      ],
+      "min": -31.164676666259766,
+      "max": 210.76303100585938,
+      "bin": "092_Identity_dense_Tensordot_0.bin"
+    },
+    {
+      "idx": 93,
+      "name": "Squeeze_1:0",
+      "shape": [
+        1,
+        1
+      ],
+      "min": -2.11271333694458,
+      "max": -2.11271333694458,
+      "bin": "093_Squeeze_1_0.bin"
+    },
+    {
+      "idx": 94,
+      "name": "Squeeze_2:0",
+      "shape": [
+        1,
+        1
+      ],
+      "min": -2.440103530883789,
+      "max": -2.440103530883789,
+      "bin": "094_Squeeze_2_0.bin"
+    },
+    {
+      "idx": 97,
+      "name": "left_hand_0_or_right_hand_1",
+      "shape": [
+        1,
+        1
+      ],
+      "min": 0.08016529679298401,
+      "max": 0.08016529679298401,
+      "bin": "097_left_hand_0_or_right_hand_1.bin"
+    }
+  ]
+}

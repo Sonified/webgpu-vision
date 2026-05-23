@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings Panel Test</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; color: #ccc; font-family: system-ui, sans-serif; min-height: 100vh; padding: 40px; max-width: 560px; margin: 0 auto; }
+  h1 { color: #4fc3f7; margin-bottom: 16px; font-size: 1.4rem; }
+  .demo-box {
+    background: rgba(30,30,60,0.6); border: 1px solid #333; border-radius: 8px;
+    padding: 20px; margin-bottom: 20px; max-width: 500px;
+  }
+  .demo-box h2 { color: #888; font-size: 0.9rem; margin-bottom: 12px; }
+  .live-val { color: #4fc3f7; font-weight: 600; }
+  #event-log {
+    background: #111; border: 1px solid #333; border-radius: 4px;
+    padding: 12px; font-family: monospace; font-size: 0.8rem;
+    max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+  }
+  .external-slider { width: 200px; accent-color: #ff6d00; }
+  button.ext-btn {
+    background: #222; color: #ff6d00; border: 1px solid #555;
+    border-radius: 4px; padding: 6px 14px; cursor: pointer; margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<script>
+(function() {
+  const CATS = [
+    { id: 'lifecycle', label: 'Lifecycle' },
+    { id: 'bench', label: 'Bench' },
+    { id: 'fps', label: 'Frame Rate' },
+    { id: 'heartbeat', label: 'Heartbeat' },
+    { id: 'tracking', label: 'Tracking' },
+    { id: 'detection', label: 'Detection' },
+  ];
+  const KEY = 'wgv_log_gates';
+  let gates;
+  try { gates = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { gates = {}; }
+  for (const c of CATS) if (!(c.id in gates)) gates[c.id] = true;
+  const workers = new Set();
+  window.__wgvLogGates = {
+    categories: CATS,
+    state: gates,
+    set(catId, enabled) {
+      gates[catId] = !!enabled;
+      try { localStorage.setItem(KEY, JSON.stringify(gates)); } catch {}
+      for (const w of workers) {
+        try { w.postMessage({ type: 'log_gates', gates: { ...gates } }); } catch {}
+      }
+    },
+    registerWorker(w) { workers.add(w); },
+    unregisterWorker(w) { workers.delete(w); },
+  };
+})();
+</script>
+
+<h1>Settings Panel Test</h1>
+
+<div class="demo-box">
+  <h2>Live store values (updates from hamburger OR external UI)</h2>
+  <div>Backend: <span class="live-val" id="lv-backend">--</span></div>
+  <div>Hand Model: <span class="live-val" id="lv-hand-model">--</span></div>
+  <div>Hand Floor: <span class="live-val" id="lv-hand-floor">--</span></div>
+  <div>Hand Beta: <span class="live-val" id="lv-hand-beta">--</span></div>
+  <div>Interp: <span class="live-val" id="lv-interp">--</span></div>
+  <div>Parallax: <span class="live-val" id="lv-parallax">--</span></div>
+</div>
+
+<div class="demo-box">
+  <h2>External UI (talks to the same store -- hamburger stays in sync)</h2>
+  <div style="margin-bottom: 8px;">
+    <label>Hand Floor (external slider): </label>
+    <input type="range" class="external-slider" id="ext-floor" min="0" max="5" step="0.1" value="2.0">
+    <span id="ext-floor-val">2.0</span>
+  </div>
+  <button class="ext-btn" id="ext-reset">Reset to defaults</button>
+</div>
+
+<div class="demo-box">
+  <h2>Event log</h2>
+  <div id="event-log"></div>
+</div>
+
+<script type="module">
+import { SettingsStore, SettingsPanel, SECTIONS, DEFAULTS, PROFILES, GLOBAL_KEYS, renderInterpBoxes } from './src/settings-panel.js';
+
+// 1. Create store with engine-dependent profiles
+const store = new SettingsStore({
+  defaults: { ...DEFAULTS, 'parallax-amount': 0.6 },
+  profiles: PROFILES,
+  profileKey: 'backend',
+  globalKeys: GLOBAL_KEYS,
+});
+store.load();
+
+// 2. Create panel -- this is all a demo needs
+const panel = new SettingsPanel(store, {
+  sections: [
+    SECTIONS.backend(),
+    SECTIONS.mediapipe(),
+    SECTIONS.interp(),
+    SECTIONS.head(),
+    { label: 'Parallax', controls: [
+      { type: 'range', key: 'parallax-amount', label: 'Amount',
+        min: 0, max: 200, step: 5,
+        toSlider: v => v * 100, fromSlider: v => v / 100,
+        format: v => v.toFixed(2) },
+    ]},
+    SECTIONS.hands(),
+    SECTIONS.detection(),
+    SECTIONS.logGates(),
+  ]
+});
+panel.reveal();
+
+// 3. Live value display -- subscribes to the store
+const ids = ['backend', 'hand-model', 'hand-floor', 'hand-beta', 'interp'];
+function updateLive() {
+  for (const key of ids) {
+    const el = document.getElementById('lv-' + key);
+    if (el) el.textContent = store.get(key);
+  }
+  document.getElementById('lv-parallax').textContent = store.get('parallax-amount');
+}
+store.onAny(() => updateLive());
+updateLive();
+
+// 4. Event log
+const logEl = document.getElementById('event-log');
+store.onAny((key, value, old) => {
+  const line = `${key}: ${old} → ${value}\n`;
+  logEl.textContent += line;
+  logEl.scrollTop = logEl.scrollHeight;
+});
+
+// 5. External UI wired to the SAME store
+const extFloor = document.getElementById('ext-floor');
+const extFloorVal = document.getElementById('ext-floor-val');
+
+// External slider writes to store
+extFloor.addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value);
+  store.set('hand-floor', v);
+  extFloorVal.textContent = v.toFixed(1);
+});
+
+// Store updates external slider (e.g. from hamburger)
+store.on('hand-floor', (v) => {
+  extFloor.value = v;
+  extFloorVal.textContent = v.toFixed(1);
+});
+
+// Reset button
+document.getElementById('ext-reset').addEventListener('click', () => {
+  store.batch(DEFAULTS);
+});
+
+// 6. Simulate adaptive interp boxes (cycles through modes)
+let simFrame = 0;
+function simInterp() {
+  simFrame++;
+  const modes = [0, 1, 2, 4];
+  const headMode = store.get('interp') === 'adaptive' ? modes[(Math.floor(simFrame / 30)) % 4] : parseInt(store.get('interp'));
+  const lMode = store.get('interp') === 'adaptive' ? modes[(Math.floor(simFrame / 20) + 1) % 4] : parseInt(store.get('interp'));
+  const rMode = store.get('interp') === 'adaptive' ? modes[(Math.floor(simFrame / 25) + 2) % 4] : parseInt(store.get('interp'));
+  renderInterpBoxes('wgv-boxes-head', headMode);
+  renderInterpBoxes('wgv-boxes-handL', lMode);
+  renderInterpBoxes('wgv-boxes-handR', rMode);
+  requestAnimationFrame(simInterp);
+}
+simInterp();
+</script>
+</body>
+</html>

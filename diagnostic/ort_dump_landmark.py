@@ -17,7 +17,7 @@ from onnx import helper, TensorProto
 import onnxruntime as ort
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'hand',
-                          'hand_landmark_10mb', 'source',
+                          'hand_landmark_large', 'source',
                           'hand_landmark_sparse_Nx3x224x224.onnx')
 SIZE = 224
 
