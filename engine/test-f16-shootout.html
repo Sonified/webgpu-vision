@@ -107,10 +107,10 @@ try {
     ]);
     return { json, bin };
   };
-  const m4f32  = await load('../models/hand/hand_landmark_4mb/hand_landmark_full');
-  const m4f16  = await load('../models/hand/hand_landmark_f16_2mb/hand_landmark_full_f16');
-  const m10f32 = await load('../models/hand/hand_landmark_10mb/hand_landmark_sparse');
-  const m10f16 = await load('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16');
+  const m4f32  = await load('../models/hand/hand_landmark_standard/hand_landmark_standard');
+  const m4f16  = await load('../models/hand/hand_landmark_standard/hand_landmark_standard_f16');
+  const m10f32 = await load('../models/hand/hand_landmark_large/hand_landmark_large');
+  const m10f16 = await load('../models/hand/hand_landmark_large/hand_landmark_large_f16');
   log('All models loaded\n');
 
   // Define the 4 contestants

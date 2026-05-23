@@ -449,7 +449,7 @@ export class ModelRunner {
         shapes[out] = inShape;
         let floats = 1;
         if (inShape && Array.isArray(inShape)) for (const d of inShape) floats *= d;
-        else floats = tensors[inp[0]].size / 4;
+        else floats = tensors[inp[0]].size / this.bpe;
         const outBuf = getOrAlloc(out, inShape || [floats]);
 
         const params = new Uint32Array([floats, 1]); // mode 1 = relu
@@ -475,7 +475,7 @@ export class ModelRunner {
         shapes[out] = inShape;
         let floats = 1;
         if (inShape && Array.isArray(inShape)) for (const d of inShape) floats *= d;
-        else floats = tensors[inp[0]].size / 4;
+        else floats = tensors[inp[0]].size / this.bpe;
 
         const slopeName = inp[1];
         const slopeInfo = w[slopeName];
@@ -727,7 +727,7 @@ export class ModelRunner {
         for (const inName of inp) {
           if (!tensors[inName]) continue;
           const buf = tensors[inName];
-          const nFloats = buf.size / 4;
+          const nFloats = buf.size / this.bpe;
 
           // Trace back: inName was produced by Reshape, whose input was Transpose,
           // whose input was the Conv. The Conv's output shape is the NCHW shape.

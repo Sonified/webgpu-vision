@@ -1,4 +1,5 @@
 enable f16;
+alias acc = f32; // accumulator precision -- change to f16 for pure f16 accumulation
 
 struct GemmParams {
     M: u32,
@@ -15,7 +16,7 @@ struct GemmParams {
 @group(0) @binding(4) var<storage, read_write> output: array<f16>;
 
 var<workgroup> shared_input: array<f16, 2048>;
-var<workgroup> shared_reduce: array<f16, 64>;
+var<workgroup> shared_reduce: array<acc, 64>;
 
 @compute @workgroup_size(64, 1, 1)
 fn main(
@@ -42,7 +43,7 @@ fn main(
             let k_start = tid * k_per_thread;
             let k_end = min(k_start + k_per_thread, K);
 
-            var partial: f16 = 0.0h;
+            var partial: acc = 0.0;
 
             let k_aligned = k_start + ((k_end - k_start) / 4u) * 4u;
             var k: u32 = k_start;
@@ -50,10 +51,10 @@ fn main(
                 let i = vec4<f16>(shared_input[k], shared_input[k+1u], shared_input[k+2u], shared_input[k+3u]);
                 let w_base = k * N + col;
                 let w = vec4<f16>(weights[w_base], weights[w_base + N], weights[w_base + N*2u], weights[w_base + N*3u]);
-                partial += dot(i, w);
+                partial += acc(dot(i, w));
             }
             for (; k < k_end; k++) {
-                partial += shared_input[k] * weights[k * N + col];
+                partial += acc(shared_input[k]) * acc(weights[k * N + col]);
             }
 
             shared_reduce[tid] = partial;
@@ -71,9 +72,9 @@ fn main(
             workgroupBarrier();
             if (tid == 0u) {
                 var val = shared_reduce[0u] + shared_reduce[1u];
-                if (params.has_bias == 1u) { val += bias[col]; }
-                if (params.has_sigmoid == 1u) { val = 1.0h / (1.0h + exp(-val)); }
-                output[col] = val;
+                if (params.has_bias == 1u) { val += acc(bias[col]); }
+                if (params.has_sigmoid == 1u) { val = 1.0 / (1.0 + exp(-val)); }
+                output[col] = f16(val);
             }
             workgroupBarrier();
         }
@@ -81,8 +82,8 @@ fn main(
         let col = wgid.x * 64u + tid;
         if (col >= N) { return; }
 
-        var sum: f16 = 0.0h;
-        if (params.has_bias == 1u) { sum = bias[col]; }
+        var sum: acc = 0.0;
+        if (params.has_bias == 1u) { sum = acc(bias[col]); }
 
         let K4 = K / 4u;
         for (var k4: u32 = 0u; k4 < K4; k4++) {
@@ -90,13 +91,13 @@ fn main(
             let i = vec4<f16>(shared_input[k], shared_input[k+1u], shared_input[k+2u], shared_input[k+3u]);
             let w_base = k * N + col;
             let w = vec4<f16>(weights[w_base], weights[w_base + N], weights[w_base + N*2u], weights[w_base + N*3u]);
-            sum += dot(i, w);
+            sum += acc(dot(i, w));
         }
         for (var k: u32 = K4 * 4u; k < K; k++) {
-            sum += shared_input[k] * weights[k * N + col];
+            sum += acc(shared_input[k]) * acc(weights[k * N + col]);
         }
 
-        if (params.has_sigmoid == 1u) { sum = 1.0h / (1.0h + exp(-sum)); }
-        output[col] = sum;
+        if (params.has_sigmoid == 1u) { sum = 1.0 / (1.0 + exp(-sum)); }
+        output[col] = f16(sum);
     }
 }

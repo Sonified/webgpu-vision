@@ -1,4 +1,5 @@
 enable f16;
+alias acc = f32; // accumulator precision -- change to f16 for pure f16 accumulation
 
 struct BlockDesc {
     dw_in_ch: u32,
@@ -38,11 +39,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
     if (ow >= d.out_w || oh >= d.out_h || oc >= d.pw_out_ch) { return; }
 
-    var pw_sum: f16 = weights[d.pw_b_off + oc];
+    var pw_sum: acc = acc(weights[d.pw_b_off + oc]);
 
     let kern = d.dw_kern;
     for (var ic: u32 = 0u; ic < d.dw_in_ch; ic++) {
-        var dw_val: f16 = weights[d.dw_b_off + ic];
+        var dw_val: acc = acc(weights[d.dw_b_off + ic]);
         for (var kh: u32 = 0u; kh < kern; kh++) {
             for (var kw: u32 = 0u; kw < kern; kw++) {
                 let ih_padded = oh * d.dw_stride + kh;
@@ -52,39 +53,39 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
                 if (ih < d.in_h && iw < d.in_w) {
                     let in_idx = ic * d.in_h * d.in_w + ih * d.in_w + iw;
                     let w_idx = d.dw_w_off + ic * kern * kern + kh * kern + kw;
-                    dw_val += input[in_idx] * weights[w_idx];
+                    dw_val += acc(input[in_idx]) * acc(weights[w_idx]);
                 }
             }
         }
 
         if (d.dw_act == 2u) {
-            dw_val = clamp(dw_val, 0.0h, 6.0h);
+            dw_val = clamp(dw_val, 0.0, 6.0);
         } else if (d.dw_act == 3u) {
-            dw_val = max(dw_val, 0.0h);
+            dw_val = max(dw_val, 0.0);
         }
 
         let pw_w_idx = d.pw_w_off + oc * d.dw_in_ch + ic;
-        pw_sum += dw_val * weights[pw_w_idx];
+        pw_sum += dw_val * acc(weights[pw_w_idx]);
     }
 
     if (d.has_residual >= 1u) {
         let sp = oh * d.out_w + ow;
         if (d.has_residual == 2u) {
             if (oc < d.res_ch) {
-                pw_sum += residual[oc * d.out_h * d.out_w + sp];
+                pw_sum += acc(residual[oc * d.out_h * d.out_w + sp]);
             }
         } else {
-            pw_sum += residual[oc * d.out_h * d.out_w + sp];
+            pw_sum += acc(residual[oc * d.out_h * d.out_w + sp]);
         }
     }
 
     if (d.act_type == 1u) {
-        if (pw_sum < 0.0h) { pw_sum *= weights[d.act_off + oc]; }
+        if (pw_sum < 0.0) { pw_sum *= acc(weights[d.act_off + oc]); }
     } else if (d.act_type == 2u) {
-        pw_sum = clamp(pw_sum, 0.0h, 6.0h);
+        pw_sum = clamp(pw_sum, 0.0, 6.0);
     } else if (d.act_type == 3u) {
-        pw_sum = max(pw_sum, 0.0h);
+        pw_sum = max(pw_sum, 0.0);
     }
 
-    output[oc * d.out_h * d.out_w + oh * d.out_w + ow] = pw_sum;
+    output[oc * d.out_h * d.out_w + oh * d.out_w + ow] = f16(pw_sum);
 }

@@ -30,10 +30,10 @@ try {
 
   // Load both models
   const [graphF32, weightsF32Raw, graphF16, weightsF16Raw] = await Promise.all([
-    fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.json').then(r => r.json()),
-    fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.bin').then(r => r.arrayBuffer()),
-    fetch('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16.json').then(r => r.json()),
-    fetch('../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16.bin').then(r => r.arrayBuffer()),
+    fetch('../models/hand/hand_landmark_large/hand_landmark_large.json').then(r => r.json()),
+    fetch('../models/hand/hand_landmark_large/hand_landmark_large.bin').then(r => r.arrayBuffer()),
+    fetch('../models/hand/hand_landmark_large/hand_landmark_large_f16.json').then(r => r.json()),
+    fetch('../models/hand/hand_landmark_large/hand_landmark_large_f16.bin').then(r => r.arrayBuffer()),
   ]);
   const weightsF32 = new Float32Array(weightsF32Raw);
   const weightsF16 = new Float16Array(weightsF16Raw);

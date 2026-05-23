@@ -1,4 +1,5 @@
 enable f16;
+alias acc = f32; // accumulator precision -- change to f16 for pure f16 accumulation
 
 struct PoolParams {
     channels: u32,
@@ -17,9 +18,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
     let spatial = params.height * params.width;
     let base = c * spatial;
-    var sum: f16 = 0.0h;
+    var sum: acc = 0.0;
     for (var i: u32 = 0u; i < spatial; i++) {
-        sum += input[base + i];
+        sum += acc(input[base + i]);
     }
-    output[c] = sum / f16(spatial);
+    output[c] = f16(sum / acc(spatial));
 }

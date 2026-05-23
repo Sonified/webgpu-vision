@@ -1,4 +1,5 @@
 enable f16;
+alias acc = f32; // accumulator precision -- change to f16 for pure f16 accumulation
 
 struct ConvParams {
     batch: u32,
@@ -45,9 +46,9 @@ fn main(
     let in_c_start = group_id * channels_per_group;
     let spatial_ok = ow < params.out_w && oh < params.out_h;
 
-    var sum: f16 = 0.0h;
+    var sum: acc = 0.0;
     let in_bounds = spatial_ok && oc < params.out_c;
-    if (in_bounds) { sum = bias[oc]; }
+    if (in_bounds) { sum = acc(bias[oc]); }
 
     // === DEPTHWISE PATH ===
     if (params.group == params.in_c && params.kern_h <= 5u && params.kern_w <= 5u) {
@@ -80,53 +81,53 @@ fn main(
 
             if (params.kern_h == 3u && params.kern_w == 3u) {
                 let b = lo * tw + lw;
-                sum += tile[b]            * weights[wb];
-                sum += tile[b + 1u]       * weights[wb + 1u];
-                sum += tile[b + 2u]       * weights[wb + 2u];
-                sum += tile[b + tw]       * weights[wb + 3u];
-                sum += tile[b + tw + 1u]  * weights[wb + 4u];
-                sum += tile[b + tw + 2u]  * weights[wb + 5u];
+                sum += acc(tile[b]            * weights[wb]);
+                sum += acc(tile[b + 1u]       * weights[wb + 1u]);
+                sum += acc(tile[b + 2u]       * weights[wb + 2u]);
+                sum += acc(tile[b + tw]       * weights[wb + 3u]);
+                sum += acc(tile[b + tw + 1u]  * weights[wb + 4u]);
+                sum += acc(tile[b + tw + 2u]  * weights[wb + 5u]);
                 let b2 = b + tw * 2u;
-                sum += tile[b2]           * weights[wb + 6u];
-                sum += tile[b2 + 1u]      * weights[wb + 7u];
-                sum += tile[b2 + 2u]      * weights[wb + 8u];
+                sum += acc(tile[b2]           * weights[wb + 6u]);
+                sum += acc(tile[b2 + 1u]      * weights[wb + 7u]);
+                sum += acc(tile[b2 + 2u]      * weights[wb + 8u]);
             } else if (params.kern_h == 5u && params.kern_w == 5u) {
                 let b = lo * tw + lw;
-                sum += tile[b]            * weights[wb];
-                sum += tile[b + 1u]       * weights[wb + 1u];
-                sum += tile[b + 2u]       * weights[wb + 2u];
-                sum += tile[b + 3u]       * weights[wb + 3u];
-                sum += tile[b + 4u]       * weights[wb + 4u];
+                sum += acc(tile[b]            * weights[wb]);
+                sum += acc(tile[b + 1u]       * weights[wb + 1u]);
+                sum += acc(tile[b + 2u]       * weights[wb + 2u]);
+                sum += acc(tile[b + 3u]       * weights[wb + 3u]);
+                sum += acc(tile[b + 4u]       * weights[wb + 4u]);
                 let r1 = b + tw;
-                sum += tile[r1]           * weights[wb + 5u];
-                sum += tile[r1 + 1u]      * weights[wb + 6u];
-                sum += tile[r1 + 2u]      * weights[wb + 7u];
-                sum += tile[r1 + 3u]      * weights[wb + 8u];
-                sum += tile[r1 + 4u]      * weights[wb + 9u];
+                sum += acc(tile[r1]           * weights[wb + 5u]);
+                sum += acc(tile[r1 + 1u]      * weights[wb + 6u]);
+                sum += acc(tile[r1 + 2u]      * weights[wb + 7u]);
+                sum += acc(tile[r1 + 3u]      * weights[wb + 8u]);
+                sum += acc(tile[r1 + 4u]      * weights[wb + 9u]);
                 let r2 = b + tw * 2u;
-                sum += tile[r2]           * weights[wb + 10u];
-                sum += tile[r2 + 1u]      * weights[wb + 11u];
-                sum += tile[r2 + 2u]      * weights[wb + 12u];
-                sum += tile[r2 + 3u]      * weights[wb + 13u];
-                sum += tile[r2 + 4u]      * weights[wb + 14u];
+                sum += acc(tile[r2]           * weights[wb + 10u]);
+                sum += acc(tile[r2 + 1u]      * weights[wb + 11u]);
+                sum += acc(tile[r2 + 2u]      * weights[wb + 12u]);
+                sum += acc(tile[r2 + 3u]      * weights[wb + 13u]);
+                sum += acc(tile[r2 + 4u]      * weights[wb + 14u]);
                 let r3 = b + tw * 3u;
-                sum += tile[r3]           * weights[wb + 15u];
-                sum += tile[r3 + 1u]      * weights[wb + 16u];
-                sum += tile[r3 + 2u]      * weights[wb + 17u];
-                sum += tile[r3 + 3u]      * weights[wb + 18u];
-                sum += tile[r3 + 4u]      * weights[wb + 19u];
+                sum += acc(tile[r3]           * weights[wb + 15u]);
+                sum += acc(tile[r3 + 1u]      * weights[wb + 16u]);
+                sum += acc(tile[r3 + 2u]      * weights[wb + 17u]);
+                sum += acc(tile[r3 + 3u]      * weights[wb + 18u]);
+                sum += acc(tile[r3 + 4u]      * weights[wb + 19u]);
                 let r4 = b + tw * 4u;
-                sum += tile[r4]           * weights[wb + 20u];
-                sum += tile[r4 + 1u]      * weights[wb + 21u];
-                sum += tile[r4 + 2u]      * weights[wb + 22u];
-                sum += tile[r4 + 3u]      * weights[wb + 23u];
-                sum += tile[r4 + 4u]      * weights[wb + 24u];
+                sum += acc(tile[r4]           * weights[wb + 20u]);
+                sum += acc(tile[r4 + 1u]      * weights[wb + 21u]);
+                sum += acc(tile[r4 + 2u]      * weights[wb + 22u]);
+                sum += acc(tile[r4 + 3u]      * weights[wb + 23u]);
+                sum += acc(tile[r4 + 4u]      * weights[wb + 24u]);
             } else {
                 for (var kh: u32 = 0u; kh < params.kern_h; kh++) {
                     for (var kw: u32 = 0u; kw < params.kern_w; kw++) {
                         let tile_idx = (lo + kh) * tw + (lw + kw);
                         let w_idx = wb + kh * params.kern_w + kw;
-                        sum += tile[tile_idx] * weights[w_idx];
+                        sum += acc(tile[tile_idx] * weights[w_idx]);
                     }
                 }
             }
@@ -147,7 +148,7 @@ fn main(
             let cur_oc = oc_base + oc_t;
             if (cur_oc >= params.out_c) { break; }
 
-            var s: f16 = bias[cur_oc];
+            var s: acc = acc(bias[cur_oc]);
             let w_base = cur_oc * cpg;
 
             let cpg8 = cpg / 8u;
@@ -159,7 +160,7 @@ fn main(
                 let i1 = i0 + stride * 4u;
                 let v1 = vec4<f16>(input[i1], input[i1 + stride], input[i1 + stride * 2u], input[i1 + stride * 3u]);
                 let w1 = vec4<f16>(weights[w_base + ic8 * 8u + 4u], weights[w_base + ic8 * 8u + 5u], weights[w_base + ic8 * 8u + 6u], weights[w_base + ic8 * 8u + 7u]);
-                s += dot(v0, w0) + dot(v1, w1);
+                s += acc(dot(v0, w0)) + acc(dot(v1, w1));
             }
             let done8 = cpg8 * 8u;
             let cpg4_rem = (cpg - done8) / 4u;
@@ -168,24 +169,24 @@ fn main(
                 let i0 = ic * stride + spatial_idx;
                 let v = vec4<f16>(input[i0], input[i0 + stride], input[i0 + stride * 2u], input[i0 + stride * 3u]);
                 let w = vec4<f16>(weights[w_base + done8 + ic4 * 4u], weights[w_base + done8 + ic4 * 4u + 1u], weights[w_base + done8 + ic4 * 4u + 2u], weights[w_base + done8 + ic4 * 4u + 3u]);
-                s += dot(v, w);
+                s += acc(dot(v, w));
             }
             let done4 = done8 + cpg4_rem * 4u;
             for (var ic = in_c_start + done4; ic < in_c_start + cpg; ic++) {
-                s += input[ic * stride + spatial_idx] * weights[w_base + (ic - in_c_start)];
+                s += acc(input[ic * stride + spatial_idx]) * acc(weights[w_base + (ic - in_c_start)]);
             }
 
             if (params.has_prelu == 1u) {
-                if (s < 0.0h) { s = s * prelu_slope[cur_oc]; }
+                if (s < 0.0) { s = s * acc(prelu_slope[cur_oc]); }
             } else if (params.has_prelu == 2u) {
-                s = clamp(s, 0.0h, 6.0h);
+                s = clamp(s, 0.0, 6.0);
             } else if (params.has_prelu == 3u) {
-                s = max(s, 0.0h);
+                s = max(s, 0.0);
             }
             if (params.has_residual == 1u) {
-                s += residual[cur_oc * out_stride + oh * params.out_w + ow];
+                s += acc(residual[cur_oc * out_stride + oh * params.out_w + ow]);
             }
-            output[cur_oc * out_stride + oh * params.out_w + ow] = s;
+            output[cur_oc * out_stride + oh * params.out_w + ow] = f16(s);
         }
         return;
     }
@@ -201,10 +202,10 @@ fn main(
         for (var ic: u32 = 0u; ic < cpg; ic++) {
             let base = (in_c_start + ic) * sp;
             let wb = oc * ksize + ic * 4u;
-            if (ih0 < params.in_h && iw0 < params.in_w) { sum += input[base + ih0 * params.in_w + iw0] * weights[wb]; }
-            if (ih0 < params.in_h && iw1 < params.in_w) { sum += input[base + ih0 * params.in_w + iw1] * weights[wb + 1u]; }
-            if (ih1 < params.in_h && iw0 < params.in_w) { sum += input[base + ih1 * params.in_w + iw0] * weights[wb + 2u]; }
-            if (ih1 < params.in_h && iw1 < params.in_w) { sum += input[base + ih1 * params.in_w + iw1] * weights[wb + 3u]; }
+            if (ih0 < params.in_h && iw0 < params.in_w) { sum += acc(input[base + ih0 * params.in_w + iw0] * weights[wb]); }
+            if (ih0 < params.in_h && iw1 < params.in_w) { sum += acc(input[base + ih0 * params.in_w + iw1] * weights[wb + 1u]); }
+            if (ih1 < params.in_h && iw0 < params.in_w) { sum += acc(input[base + ih1 * params.in_w + iw0] * weights[wb + 2u]); }
+            if (ih1 < params.in_h && iw1 < params.in_w) { sum += acc(input[base + ih1 * params.in_w + iw1] * weights[wb + 3u]); }
         }
     }
     else {
@@ -219,7 +220,7 @@ fn main(
                         let w_idx = oc * channels_per_group * params.kern_h * params.kern_w
                                   + ic * params.kern_h * params.kern_w
                                   + kh * params.kern_w + kw;
-                        sum += input[in_idx] * weights[w_idx];
+                        sum += acc(input[in_idx]) * acc(weights[w_idx]);
                     }
                 }
             }
@@ -228,17 +229,17 @@ fn main(
 
     if (in_bounds) {
         if (params.has_prelu == 1u) {
-            if (sum < 0.0h) { sum = sum * prelu_slope[oc]; }
+            if (sum < 0.0) { sum = sum * acc(prelu_slope[oc]); }
         } else if (params.has_prelu == 2u) {
-            sum = clamp(sum, 0.0h, 6.0h);
+            sum = clamp(sum, 0.0, 6.0);
         } else if (params.has_prelu == 3u) {
-            sum = max(sum, 0.0h);
+            sum = max(sum, 0.0);
         }
         if (params.has_residual == 1u) {
             let out_idx = oc * params.out_h * params.out_w + oh * params.out_w + ow;
-            sum += residual[out_idx];
+            sum += acc(residual[out_idx]);
         }
         let out_idx = oc * params.out_h * params.out_w + oh * params.out_w + ow;
-        output[out_idx] = sum;
+        output[out_idx] = f16(sum);
     }
 }

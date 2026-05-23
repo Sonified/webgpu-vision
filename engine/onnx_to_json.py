@@ -3,9 +3,9 @@
 Convert an ONNX model to the .json + .bin format consumed by ModelRunner.
 
 Usage:
-  python3 engine/onnx_to_json.py models/hand/hand_landmark_10mb/source/hand_landmark_sparse_Nx3x224x224.onnx \
-    --output-dir models/hand/hand_landmark_10mb \
-    --name hand_landmark_sparse
+  python3 engine/onnx_to_json.py models/hand/hand_landmark_large/source/hand_landmark_sparse_Nx3x224x224.onnx \
+    --output-dir models/hand/hand_landmark_large \
+    --name hand_landmark_large
 
 Outputs:
   <output-dir>/<name>.json  -- graph structure, weight metadata

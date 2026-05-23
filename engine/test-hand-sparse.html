@@ -20,8 +20,8 @@ try {
   log('WebGPU ready');
 
   // Load sparse model
-  const graph = await (await fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.json')).json();
-  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_10mb/hand_landmark_sparse.bin')).arrayBuffer());
+  const graph = await (await fetch('../models/hand/hand_landmark_large/hand_landmark_large.json')).json();
+  const allWeights = new Float32Array(await (await fetch('../models/hand/hand_landmark_large/hand_landmark_large.bin')).arrayBuffer());
   log(`Model: ${graph.graph.length} nodes, ${(allWeights.length*4/1024/1024).toFixed(2)} MB`);
   log(`Input: ${JSON.stringify(graph.input)}`);
   log(`Outputs: ${graph.outputs.map(o => o.name + ' ' + JSON.stringify(o.shape)).join(', ')}`);
@@ -101,8 +101,8 @@ try {
   // Compare with 4MB model
   log('\n--- 4MB model comparison ---');
   try {
-    const graph4 = await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.json')).json();
-    const weights4 = new Float32Array(await (await fetch('../models/hand/hand_landmark_4mb/hand_landmark_full.bin')).arrayBuffer());
+    const graph4 = await (await fetch('../models/hand/hand_landmark_standard/hand_landmark_standard.json')).json();
+    const weights4 = new Float32Array(await (await fetch('../models/hand/hand_landmark_standard/hand_landmark_standard.bin')).arrayBuffer());
     const W4 = {};
     for (const [name, info] of Object.entries(graph4.weights)) {
       if (info.length === 0) continue;

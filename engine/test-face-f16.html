@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html><head><title>Face Landmark f32 vs f16 Comparison</title></head>
+<body>
+<pre id="log">Loading...</pre>
+<script type="module">
+import { ModelRunner } from './model-runner.js';
+
+const S = 256;
+const el = document.getElementById('log');
+const log = s => { el.textContent += '\n' + s; console.log(s); };
+
+(async () => {
+  el.textContent = '=== Face Landmark f32 vs f16 ===';
+
+  const adapter = await navigator.gpu.requestAdapter();
+  const hasF16 = adapter.features.has('shader-f16');
+  log(`shader-f16: ${hasF16}`);
+  if (!hasF16) { log('ERROR: no shader-f16 support'); return; }
+  const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] });
+
+  // Load both models
+  const [graphF32, weightsF32Raw, graphF16, weightsF16Raw] = await Promise.all([
+    fetch('../models/face/face_landmarks/face_landmarks_detector.json').then(r => r.json()),
+    fetch('../models/face/face_landmarks/face_landmarks_detector.bin').then(r => r.arrayBuffer()),
+    fetch('../models/face/face_landmarks/face_landmarks_detector_f16.json').then(r => r.json()),
+    fetch('../models/face/face_landmarks/face_landmarks_detector_f16.bin').then(r => r.arrayBuffer()),
+  ]);
+  const weightsF32 = new Float32Array(weightsF32Raw);
+  const weightsF16 = new Float16Array(weightsF16Raw);
+  log(`f32 model: ${graphF32.graph.length} ops, ${weightsF32.length} params (${(weightsF32.length*4/1024/1024).toFixed(1)} MB)`);
+  log(`f16 model: ${graphF16.graph.length} ops, ${weightsF16.length} params (${(weightsF16.length*2/1024/1024).toFixed(1)} MB)`);
+
+  // Build pipelines
+  const mkP = async (name) => {
+    const code = await (await fetch(`${name}.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const mkF16 = async (name) => {
+    const code = await (await fetch(`${name}_f16.wgsl`)).text();
+    return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  };
+  const PF32 = {
+    conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
+    gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
+    add: await mkP('add'), pad_channels: await mkP('pad_channels'),
+    fused_block: await mkP('fused_block'), fused_block_tiled: await mkP('fused_block_tiled'),
+    transpose_nhwc: await mkP('transpose_nhwc'),
+  };
+  const PF16 = {
+    conv2d: await mkF16('conv2d'), maxpool: await mkF16('maxpool'),
+    gemm: await mkF16('gemm'), global_avg_pool: await mkF16('global_avg_pool'),
+    add: await mkF16('add'), fused_block: await mkF16('fused_block'),
+    fused_block_tiled: null,
+    resize: PF32.resize,
+    transpose_nhwc: await mkF16('transpose_nhwc'),
+    pad_channels: await mkF16('pad_channels'),
+  };
+
+  // Cast pipeline (f32 -> f16 for input)
+  const castCode = await (await fetch('cast_f32_to_f16.wgsl')).text();
+  const castPipeline = device.createComputePipeline({
+    layout: 'auto', compute: { module: device.createShaderModule({ code: castCode }), entryPoint: 'main' },
+  });
+  const castParamsBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(castParamsBuf, 0, new Uint32Array([S * S * 3]));
+
+  // Load real face image and convert to NCHW [0,1]
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = '../images/test_images/face_and_hand/hand_000.png'; });
+  const canvas = new OffscreenCanvas(S, S);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, S, S);
+  const pixels = ctx.getImageData(0, 0, S, S).data;
+  const nchw = new Float32Array(3 * S * S);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const pi = (y * S + x) * 4;
+      const si = y * S + x;
+      nchw[si]             = pixels[pi]     / 255.0; // R
+      nchw[S*S + si]       = pixels[pi + 1] / 255.0; // G
+      nchw[2*S*S + si]     = pixels[pi + 2] / 255.0; // B
+    }
+  }
+  log(`Input: ${img.naturalWidth}x${img.naturalHeight} -> ${S}x${S} NCHW`);
+  const BF = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+  const inputBuf = device.createBuffer({ size: nchw.byteLength, usage: BF });
+  device.queue.writeBuffer(inputBuf, 0, nchw);
+
+  // f16 input buffer + cast
+  const inputBufF16 = device.createBuffer({ size: S * S * 3 * 2 + (S * S * 3 * 2 % 4), usage: BF });
+  const castBG = device.createBindGroup({
+    layout: castPipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: castParamsBuf } },
+      { binding: 1, resource: { buffer: inputBuf } },
+      { binding: 2, resource: { buffer: inputBufF16 } },
+    ],
+  });
+
+  // --- f32 runner ---
+  const align4 = (arr, TA) => {
+    if (arr.byteLength % 4 === 0) return arr;
+    const p = new TA(arr.length + 1); p.set(arr); return p;
+  };
+
+  function makeWeightBuffers(weights, graph, bpe, TA) {
+    const W = {};
+    for (const [name, info] of Object.entries(graph.weights)) {
+      if (info.length === 0) continue;
+      const data = align4(weights.subarray(info.offset, info.offset + info.length), TA);
+      const buf = device.createBuffer({ size: Math.max(data.byteLength, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      device.queue.writeBuffer(buf, 0, data);
+      W[name] = buf;
+    }
+    const allPadded = align4(weights, TA);
+    const allBuf = device.createBuffer({ size: allPadded.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(allBuf, 0, allPadded);
+    return { W, allBuf };
+  }
+
+  log('\n--- Compiling f32 model ---');
+  const { W: W32, allBuf: allBuf32 } = makeWeightBuffers(weightsF32, graphF32, 4, Float32Array);
+  const runner32 = new ModelRunner(device, PF32, W32, allBuf32);
+  const out32init = await runner32.compile(graphF32, inputBuf, weightsF32);
+  log(`f32 compiled: ${Object.keys(out32init).length} outputs`);
+
+  log('\n--- Compiling f16 model ---');
+  const { W: W16, allBuf: allBuf16 } = makeWeightBuffers(weightsF16, graphF16, 2, Float16Array);
+  const runner16 = new ModelRunner(device, PF16, W16, allBuf16, { f16: true });
+  const out16init = await runner16.compile(graphF16, inputBufF16, weightsF16);
+  log(`f16 compiled: ${Object.keys(out16init).length} outputs`);
+
+  // Cast f32 input to f16 before running f16 model
+  {
+    const ce = device.createCommandEncoder();
+    const cp = ce.beginComputePass();
+    cp.setPipeline(castPipeline);
+    cp.setBindGroup(0, castBG);
+    cp.dispatchWorkgroups(Math.ceil(S * S * 3 / 256));
+    cp.end();
+    device.queue.submit([ce.finish()]);
+    await device.queue.onSubmittedWorkDone();
+  }
+
+  // Run both with dumpAll to get per-layer tensors
+  log('\n--- Running f32 (dumpAll) ---');
+  const dump32 = await runner32.run(graphF32, inputBuf, weightsF32, false, true);
+  log(`  dumped ${Object.keys(dump32).length} layers`);
+
+  log('--- Running f16 (dumpAll) ---');
+  const dump16 = await runner16.run(graphF16, inputBufF16, weightsF16, false, true);
+  log(`  dumped ${Object.keys(dump16).length} layers`);
+
+  // Find first diverging layer
+  log('\n--- LAYER-BY-LAYER COMPARISON ---');
+  const keys32 = Object.keys(dump32).map(Number).sort((a,b) => a-b);
+  const keys16 = Object.keys(dump16).map(Number).sort((a,b) => a-b);
+  let firstBadIdx = null;
+  for (const idx of keys16) {
+    const t16 = dump16[idx];
+    const t32 = dump32[idx];
+    const hasNaN = t16.data.some(v => isNaN(v));
+    const hasInf = t16.data.some(v => !isFinite(v) && !isNaN(v));
+
+    if (hasNaN || hasInf) {
+      log(`  [${idx}] ${t16.op} ${JSON.stringify(t16.shape)} -> ${hasNaN ? 'NaN' : 'Inf'} <<<`);
+      firstBadIdx = idx;
+      break;
+    }
+
+    if (t32) {
+      const n = Math.min(t16.data.length, t32.data.length, 5000);
+      let maxErr = 0, maxI = 0;
+      for (let i = 0; i < n; i++) {
+        const d = Math.abs(t32.data[i] - t16.data[i]);
+        if (d > maxErr) { maxErr = d; maxI = i; }
+      }
+      const f32max = Math.max(...Array.from(t32.data.slice(0, n)).map(Math.abs));
+      const relErr = f32max > 0 ? maxErr / f32max : 0;
+      const tag = relErr < 0.05 ? 'OK' : relErr < 0.2 ? 'WARN' : 'BAD';
+      if (tag !== 'OK' || idx < 10 || idx % 20 === 0) {
+        log(`  [${idx}] ${t16.op} ${JSON.stringify(t16.shape)} ${tag} maxErr=${maxErr.toFixed(4)} rel=${relErr.toFixed(4)} max|f32|=${f32max.toFixed(2)}`);
+      }
+      if (tag === 'BAD' && firstBadIdx === null) {
+        firstBadIdx = idx;
+        const f32v = Array.from(t32.data.slice(0,8)).map(v => v.toFixed(4));
+        const f16v = Array.from(t16.data.slice(0,8)).map(v => v.toFixed(4));
+        log(`    f32 first8: [${f32v}]`);
+        log(`    f16 first8: [${f16v}]`);
+        log(`    >>> FIRST BAD LAYER <<<`);
+      }
+    }
+  }
+
+  // Also run with encodeInto for final output comparison
+  log('\n--- Recompiling for output comparison ---');
+  const runner32b = new ModelRunner(device, PF32, W32, allBuf32);
+  await runner32b.compile(graphF32, inputBuf, weightsF32);
+  const runner16b = new ModelRunner(device, PF16, W16, allBuf16, { f16: true });
+  await runner16b.compile(graphF16, inputBufF16, weightsF16);
+
+  const enc32 = device.createCommandEncoder();
+  runner32b.encodeInto(enc32);
+  device.queue.submit([enc32.finish()]);
+  const results32 = await runner32b.readOutputs();
+
+  const enc16 = device.createCommandEncoder();
+  const cp2 = enc16.beginComputePass();
+  cp2.setPipeline(castPipeline); cp2.setBindGroup(0, castBG);
+  cp2.dispatchWorkgroups(Math.ceil(S * S * 3 / 256)); cp2.end();
+  runner16b.encodeInto(enc16);
+  device.queue.submit([enc16.finish()]);
+  const results16 = await runner16b.readOutputs();
+
+  log('\n--- OUTPUT COMPARISON ---');
+  for (const name of Object.keys(results32)) {
+    const f32 = results32[name];
+    const f16 = results16[name];
+    if (!f16) { log(`  ${name}: MISSING in f16`); continue; }
+    if (f32.length !== f16.length) { log(`  ${name}: SIZE MISMATCH f32=${f32.length} f16=${f16.length}`); continue; }
+    let maxAbs = 0, sumSq = 0, maxIdx = 0;
+    for (let i = 0; i < f32.length; i++) {
+      const d = Math.abs(f32[i] - f16[i]);
+      sumSq += d * d;
+      if (d > maxAbs) { maxAbs = d; maxIdx = i; }
+    }
+    const rmse = Math.sqrt(sumSq / f32.length);
+    const tag = maxAbs < 0.5 ? 'OK' : 'DIVERGE';
+    log(`  ${name} [${f32.length}]: ${tag} maxAbs=${maxAbs.toFixed(4)} rmse=${rmse.toFixed(6)} @${maxIdx} f32=${f32[maxIdx]?.toFixed(4)} f16=${f16[maxIdx]?.toFixed(4)}`);
+    if (f32.length <= 10) {
+      log(`    f32: [${Array.from(f32).map(v => v.toFixed(4))}]`);
+      log(`    f16: [${Array.from(f16).map(v => v.toFixed(4))}]`);
+    } else {
+      log(`    f32 first8: [${Array.from(f32.slice(0,8)).map(v => v.toFixed(4))}]`);
+      log(`    f16 first8: [${Array.from(f16.slice(0,8)).map(v => v.toFixed(4))}]`);
+    }
+  }
+
+  // Benchmark
+  log('\n--- BENCHMARK (20 iterations each) ---');
+  for (let i = 0; i < 5; i++) {
+    const e = device.createCommandEncoder(); runner32.encodeInto(e); device.queue.submit([e.finish()]); await runner32.readOutputs();
+  }
+  const t0f32 = performance.now();
+  for (let i = 0; i < 20; i++) {
+    const e = device.createCommandEncoder(); runner32.encodeInto(e); device.queue.submit([e.finish()]); await runner32.readOutputs();
+  }
+  const f32ms = (performance.now() - t0f32) / 20;
+
+  for (let i = 0; i < 5; i++) {
+    const e = device.createCommandEncoder();
+    const cp = e.beginComputePass(); cp.setPipeline(castPipeline); cp.setBindGroup(0, castBG); cp.dispatchWorkgroups(Math.ceil(S*S*3/256)); cp.end();
+    runner16.encodeInto(e); device.queue.submit([e.finish()]); await runner16.readOutputs();
+  }
+  const t0f16 = performance.now();
+  for (let i = 0; i < 20; i++) {
+    const e = device.createCommandEncoder();
+    const cp = e.beginComputePass(); cp.setPipeline(castPipeline); cp.setBindGroup(0, castBG); cp.dispatchWorkgroups(Math.ceil(S*S*3/256)); cp.end();
+    runner16.encodeInto(e); device.queue.submit([e.finish()]); await runner16.readOutputs();
+  }
+  const f16ms = (performance.now() - t0f16) / 20;
+
+  log(`  f32: ${f32ms.toFixed(2)}ms`);
+  log(`  f16: ${f16ms.toFixed(2)}ms`);
+  log(`  speedup: ${(f32ms / f16ms).toFixed(2)}x`);
+
+  log('\ndone');
+  window.__testDone = true;
+})().catch(e => { log('ERROR: ' + e.message + '\n' + e.stack); window.__testDone = 'error'; });
+</script>
+</body>
+</html>

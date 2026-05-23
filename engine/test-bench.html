@@ -10,20 +10,20 @@ const L = document.getElementById('log');
 const log = s => { L.textContent += s + '\n'; console.log(s); };
 
 const MODELS = {
-  '4mb-f32':  { json: '../models/hand/hand_landmark_4mb/hand_landmark_full',           f16: false },
-  '4mb-f16':  { json: '../models/hand/hand_landmark_f16_2mb/hand_landmark_full_f16',   f16: true  },
-  '10mb-f32': { json: '../models/hand/hand_landmark_10mb/hand_landmark_sparse',        f16: false },
-  '10mb-f16': { json: '../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16', f16: true  },
+  'standard-f32': { json: '../models/hand/hand_landmark_standard/hand_landmark_standard',        f16: false },
+  'standard-f16': { json: '../models/hand/hand_landmark_standard/hand_landmark_standard_f16',    f16: true  },
+  'large-f32':    { json: '../models/hand/hand_landmark_large/hand_landmark_large',              f16: false },
+  'large-f16':    { json: '../models/hand/hand_landmark_large/hand_landmark_large_f16',          f16: true  },
 };
 
 const params = new URLSearchParams(location.search);
-const which = params.get('m') || '4mb-f32';
+const which = params.get('m') || 'standard-f32';
 const model = MODELS[which];
 
 if (!model) {
   log('Unknown model: ' + which);
   log('Options: ' + Object.keys(MODELS).join(', '));
-  log('Usage: test-bench.html?m=4mb-f16');
+  log('Usage: test-bench.html?m=standard-f16');
 } else {
 
 (async () => {
