@@ -25,17 +25,51 @@
     font-weight: 600;
   }
   #start-btn:hover { background: #81d4fa; }
-  #controls {
-    position: fixed; top: 12px; left: 12px; z-index: 10;
-    font-size: 1rem; color: #ccc;
-    background: rgba(10,10,26,0.92); padding: 8px 12px; border-radius: 6px;
-    border: 1px solid #333; display: none;
+  #hamburger-btn {
+    position: fixed; top: 12px; left: 12px; z-index: 1100;
+    width: 44px; height: 44px; padding: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(10,10,26,0.92); border: 1px solid #333;
+    border-radius: 6px;
+    color: #ccc; font-size: 1.35rem; line-height: 1;
+    cursor: pointer; user-select: none;
+    transition: color 0.15s, border-color 0.15s, transform 0.25s ease;
   }
-  #controls select {
-    background: #111; color: #fff; border: 1px solid #444; border-radius: 3px;
-    padding: 2px 6px; font-size: 1rem; margin-left: 4px;
+  #hamburger-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
+  #hud { transition: transform 0.25s ease; }
+  body.drawer-open #hamburger-btn,
+  body.drawer-open #hud {
+    transform: translateX(268px);
   }
-  #controls .sep { margin-left: 10px; }
+  #settings-drawer {
+    position: fixed; top: 0; left: 0;
+    width: 260px; height: 100%;
+    background: #1e1e1e; border-right: 1px solid #444;
+    z-index: 1100;
+    transform: translateX(-100%); transition: transform 0.25s ease;
+    overflow-y: auto; font-size: 13px; color: #ddd;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent;
+    padding: 56px 14px 14px; box-sizing: border-box;
+  }
+  #settings-drawer::-webkit-scrollbar { width: 5px; }
+  #settings-drawer::-webkit-scrollbar-track { background: transparent; }
+  #settings-drawer::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+  #settings-drawer.open { transform: translateX(0); }
+  #settings-drawer .section-label {
+    color: #4fc3f7; font-weight: 600; font-size: 0.95rem; margin-bottom: 6px;
+  }
+  #settings-drawer .param-row {
+    display: flex; align-items: center; margin-bottom: 5px;
+  }
+  #settings-drawer .param-name {
+    width: 80px; color: #888; font-size: 0.85rem;
+  }
+  #settings-drawer select {
+    flex: 1; background: #222; color: #ccc; border: 1px solid #444;
+    border-radius: 3px; padding: 2px 6px; font-size: 0.85rem;
+  }
+  #settings-drawer > * { margin-bottom: 14px; }
+  #settings-drawer > *:last-child { margin-bottom: 0; }
   #self-view {
     position: fixed; bottom: 16px; right: 16px; z-index: 10;
     border-radius: 10px; overflow: hidden;
@@ -44,6 +78,7 @@
     display: none; width: 200px;
   }
   #self-view video { display: block; width: 100%; height: auto; transform: scaleX(-1); }
+  #self-view canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
   #status {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     z-index: 10; font-size: 1.2rem; color: #ccc; font-weight: 500;
@@ -56,51 +91,86 @@
 
 <!-- COI for WebGPU SharedArrayBuffer -->
 <script src="../../coi-serviceworker.js"></script>
+<script src="mediapipe-vision.js"></script>
 
 <button id="start-btn">Start Camera</button>
 <div id="status"></div>
 
-<div id="controls">
-  <span style="color:#888;">Backend</span>
-  <select id="backend-select">
-    <option value="webgpu">WebGPU</option>
-    <option value="mediapipe">MediaPipe</option>
-  </select>
-  <span class="sep" style="color:#888;">Style</span>
-  <select id="hand-style">
-    <option value="energy">Energy</option>
-    <option value="fire">Fire</option>
-    <option value="ice">Ice</option>
-    <option value="void">Void</option>
-    <option value="xray">X-Ray</option>
-  </select>
-  <span class="sep" style="color:#888;">Ripples</span>
-  <select id="ripple-toggle">
-    <option value="off">Off</option>
-    <option value="on">On</option>
-  </select>
-  <span class="sep" style="color:#888;">Particles</span>
-  <select id="particle-mode">
-    <option value="none">None</option>
-    <option value="trail">Trail</option>
-    <option value="shimmer">Shimmer</option>
-  </select>
-  <span class="sep" style="color:#888;">Interp</span>
-  <select id="interp-select">
-    <option value="1">1x (off)</option>
-    <option value="2">2x</option>
-    <option value="4">4x</option>
-    <option value="adaptive">Adaptive</option>
-  </select>
+<button id="hamburger-btn" title="Settings (press ~)">☰</button>
+<div id="settings-drawer">
+  <!-- Backend -->
+  <div>
+    <div class="section-label">Backend</div>
+    <div class="param-row">
+      <span class="param-name">Engine</span>
+      <select id="backend-select">
+        <option value="webgpu">WebGPU</option>
+        <option value="mediapipe">MediaPipe</option>
+      </select>
+    </div>
+  </div>
+  <!-- MediaPipe mode (visible only when MediaPipe active) -->
+  <div id="mediapipe-mode-controls" style="display:none;">
+    <div class="section-label">MediaPipe</div>
+    <div class="param-row">
+      <span class="param-name">Mode</span>
+      <select id="mediapipe-mode">
+        <option value="workers">Workers</option>
+        <option value="standard">Standard (main thread)</option>
+      </select>
+    </div>
+  </div>
+  <!-- Visual -->
+  <div>
+    <div class="section-label">Visual</div>
+    <div class="param-row">
+      <span class="param-name">Style</span>
+      <select id="hand-style">
+        <option value="energy">Energy</option>
+        <option value="fire">Fire</option>
+        <option value="ice">Ice</option>
+        <option value="void">Void</option>
+        <option value="xray">X-Ray</option>
+      </select>
+    </div>
+    <div class="param-row">
+      <span class="param-name">Ripples</span>
+      <select id="ripple-toggle">
+        <option value="off">Off</option>
+        <option value="on">On</option>
+      </select>
+    </div>
+    <div class="param-row">
+      <span class="param-name">Particles</span>
+      <select id="particle-mode">
+        <option value="none">None</option>
+        <option value="trail">Trail</option>
+        <option value="shimmer">Shimmer</option>
+      </select>
+    </div>
+  </div>
+  <!-- Performance -->
+  <div>
+    <div class="section-label">Performance</div>
+    <div class="param-row">
+      <span class="param-name">Interp</span>
+      <select id="interp-select">
+        <option value="1">1x (off)</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="adaptive">Adaptive</option>
+      </select>
+    </div>
+  </div>
 </div>
 
-<div id="self-view"><video id="video" autoplay playsinline muted></video></div>
+<div id="self-view"><video id="video" autoplay playsinline muted></video><canvas id="overlay-canvas"></canvas></div>
 
 <div id="hud">
   <span class="label">FPS:</span> <span class="val" id="fps">--</span><br>
   <span class="label">Hands:</span> <span class="val" id="hand-count">0</span><br>
   <span class="label">Backend:</span> <span class="val" id="backend-label">--</span><br>
-  <span class="label">Z:</span> <span class="val" id="hand-z" style="font-size:0.85rem;">--</span>
+  <!-- <span class="label">Z:</span> <span class="val" id="hand-z" style="font-size:0.85rem;">- -</span> -->
 </div>
 
 <script type="importmap">
@@ -132,6 +202,33 @@ const FINGERTIPS = [4, 8, 12, 16, 20];
 // Which fingertips emit waves (indices into FINGERTIPS array)
 // 0=thumb(4), 1=index(8), 2=middle(12), 3=ring(16), 4=pinky(20)
 const WAVE_FINGERS = [1]; // index fingers only
+// ---- Overlay canvas for self-view ----
+const overlayCanvas = document.getElementById('overlay-canvas');
+const overlayCtx = overlayCanvas.getContext('2d');
+
+function drawOverlay(hands) {
+  const cw = overlayCanvas.width, ch = overlayCanvas.height;
+  overlayCtx.clearRect(0, 0, cw, ch);
+  for (const lms of hands) {
+    if (!lms) continue;
+    overlayCtx.strokeStyle = 'rgba(79, 195, 247, 0.8)';
+    overlayCtx.lineWidth = 2;
+    for (const [a, b] of EDGES) {
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(lms[a].x * cw, lms[a].y * ch);
+      overlayCtx.lineTo(lms[b].x * cw, lms[b].y * ch);
+      overlayCtx.stroke();
+    }
+    for (let i = 0; i < 21; i++) {
+      const r = FINGERTIPS.includes(i) ? 4 : 3;
+      overlayCtx.fillStyle = FINGERTIPS.includes(i) ? '#81d4fa' : '#4fc3f7';
+      overlayCtx.beginPath();
+      overlayCtx.arc(lms[i].x * cw, lms[i].y * ch, r, 0, Math.PI * 2);
+      overlayCtx.fill();
+    }
+  }
+}
+
 const JOINT_RADIUS = 0.06;
 const TIP_RADIUS = 0.08;
 const BONE_RADIUS = 0.03;
@@ -152,17 +249,35 @@ function savePref(k, v) { savedPrefs[k] = v; localStorage.setItem(LS_KEY, JSON.s
 
 let currentStyle = savedPrefs.style || 'energy';
 let activeBackend = savedPrefs.backend || 'webgpu';
+let mediapipeMode = savedPrefs.mediapipeMode || 'workers';
 
 const statusEl = document.getElementById('status');
 const video = document.getElementById('video');
 const backendSelect = document.getElementById('backend-select');
 
+// ---- Hamburger drawer ----
+function toggleSettingsDrawer() {
+  const drawer = document.getElementById('settings-drawer');
+  const open = drawer.classList.toggle('open');
+  document.body.classList.toggle('drawer-open', open);
+}
+document.getElementById('hamburger-btn').addEventListener('click', toggleSettingsDrawer);
+window.addEventListener('keydown', (e) => {
+  if (e.key === '`' || e.key === '~') toggleSettingsDrawer();
+});
+
+function syncMediaPipeModeVisibility() {
+  const el = document.getElementById('mediapipe-mode-controls');
+  if (el) el.style.display = activeBackend === 'mediapipe' ? 'block' : 'none';
+}
+
 // Apply saved selections to dropdowns
 document.getElementById('hand-style').value = currentStyle;
 backendSelect.value = activeBackend;
+document.getElementById('mediapipe-mode').value = mediapipeMode;
 document.getElementById('particle-mode').value = savedPrefs.particles || 'none';
-let ripplesOn = (savedPrefs.ripples || 'off') === 'on';
-document.getElementById('ripple-toggle').value = savedPrefs.ripples || 'off';
+let ripplesOn = (savedPrefs.ripples || 'on') === 'on';
+document.getElementById('ripple-toggle').value = savedPrefs.ripples || 'on';
 document.getElementById('ripple-toggle').addEventListener('change', (e) => { ripplesOn = e.target.value === 'on'; savePref('ripples', e.target.value); });
 
 // ---- Three.js setup ----
@@ -672,11 +787,11 @@ function getWaveTipUVs(filteredHands) {
 
 const prevWaveUVs = [null, null];
 
-const BASE_WAVE_SPEED = 0.25;
+const BASE_WAVE_SPEED = 0.50;
 
 function stepWaveEquation(filteredHands) {
   const curUVs = getWaveTipUVs(filteredHands);
-  const substeps = Math.max(1, parseInt(interpolationMode) || (interpolationMode === 'adaptive' ? 3 : 1));
+  const substeps = 2;
   const sources = waveSimMaterial.uniforms.uSources.value;
   waveSimMaterial.uniforms.uWaveSpeed.value = BASE_WAVE_SPEED / substeps;
 
@@ -884,10 +999,25 @@ async function initWebGPUBackend() {
   }
 }
 
+let latencyLog = [];
+let lastLatencyPrint = 0;
+
 function processWebGPUHands() {
   if (!gpuReady || gpuHandBusy) return;
   gpuHandBusy = true;
+  const t0 = performance.now();
   gpuHandTracker.processFrame(video).then(result => {
+    const ms = performance.now() - t0;
+    latencyLog.push(ms);
+    const now = performance.now();
+    if (now - lastLatencyPrint > 2000) {
+      const avg = latencyLog.reduce((a, b) => a + b, 0) / latencyLog.length;
+      const min = Math.min(...latencyLog);
+      const max = Math.max(...latencyLog);
+      console.log(`[pipeline] ${latencyLog.length} frames | avg=${avg.toFixed(1)}ms min=${min.toFixed(1)}ms max=${max.toFixed(1)}ms`);
+      latencyLog = [];
+      lastLatencyPrint = now;
+    }
     if (result.hands && result.hands.some(Boolean)) {
       handleHandResult(result.hands, { stable: true });
     } else {
@@ -928,6 +1058,8 @@ let mpHandReady = false;
 let mpHandIdle = true;
 let mpVfcRunning = false;
 
+let mpSendT0 = 0;
+
 function initMediaPipeBackend() {
   if (handWorker) return;
   handWorker = new Worker('hand-worker.js');
@@ -935,6 +1067,19 @@ function initMediaPipeBackend() {
     if (e.data.type === 'init') { mpHandReady = true; return; }
     if (e.data.type === 'result') {
       mpHandIdle = true;
+      if (mpSendT0) {
+        const ms = performance.now() - mpSendT0;
+        latencyLog.push(ms);
+        const now = performance.now();
+        if (now - lastLatencyPrint > 2000) {
+          const avg = latencyLog.reduce((a, b) => a + b, 0) / latencyLog.length;
+          const min = Math.min(...latencyLog);
+          const max = Math.max(...latencyLog);
+          console.log(`[mediapipe-wkr] ${latencyLog.length} frames | avg=${avg.toFixed(1)}ms min=${min.toFixed(1)}ms max=${max.toFixed(1)}ms`);
+          latencyLog = [];
+          lastLatencyPrint = now;
+        }
+      }
       handleHandResult(e.data.hands);
     }
   };
@@ -950,6 +1095,7 @@ function mpVfcTick() {
   if (!mpVfcRunning) return;
   if (activeBackend === 'mediapipe' && mpHandReady && mpHandIdle) {
     mpHandIdle = false;
+    mpSendT0 = performance.now();
     createImageBitmap(video, { resizeWidth: 320, resizeHeight: 240 }).then(bmp => {
       handWorker.postMessage(
         { type: 'detect', image: bmp, timestamp: performance.now() },
@@ -966,6 +1112,92 @@ function startMediaPipeVfcLoop() {
 }
 
 function stopMediaPipeVfcLoop() { mpVfcRunning = false; }
+
+// ============================================================
+// BACKEND: MediaPipe Standard (main thread)
+// ============================================================
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
+const MP_HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task';
+
+let mpStdHandLandmarker = null;
+let mpStdReady = false;
+let mpStdVfcRunning = false;
+
+async function initMediaPipeStandard(numHands) {
+  if (mpStdReady) return;
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Loading MediaPipe (main thread)...';
+  const vision = await $mediapipe.FilesetResolver.forVisionTasks(WASM_URL);
+  mpStdHandLandmarker = await $mediapipe.HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: MP_HAND_MODEL, delegate: 'GPU' },
+    runningMode: 'VIDEO', numHands: numHands || 2,
+    minHandDetectionConfidence: 0.3, minTrackingConfidence: 0.3,
+  });
+  mpStdReady = true;
+  statusEl.style.display = 'none';
+}
+
+function sendMediaPipeStandardFrames() {
+  if (!mpStdVfcRunning) return;
+  if (document.hidden) { video.requestVideoFrameCallback(sendMediaPipeStandardFrames); return; }
+  if (!mpStdReady) { video.requestVideoFrameCallback(sendMediaPipeStandardFrames); return; }
+
+  const now = performance.now();
+  const t0 = performance.now();
+  const result = mpStdHandLandmarker.detectForVideo(video, now);
+  const ms = performance.now() - t0;
+  latencyLog.push(ms);
+  if (performance.now() - lastLatencyPrint > 2000) {
+    const avg = latencyLog.reduce((a, b) => a + b, 0) / latencyLog.length;
+    const min = Math.min(...latencyLog);
+    const max = Math.max(...latencyLog);
+    console.log(`[mediapipe-std] ${latencyLog.length} frames | avg=${avg.toFixed(1)}ms min=${min.toFixed(1)}ms max=${max.toFixed(1)}ms`);
+    latencyLog = [];
+    lastLatencyPrint = performance.now();
+  }
+  const hands = [];
+  if (result.landmarks) {
+    for (let i = 0; i < result.landmarks.length; i++) {
+      hands.push({
+        landmarks: result.landmarks[i],
+        handedness: result.handednesses?.[i]?.[0]?.categoryName || 'Unknown',
+      });
+    }
+  }
+  handleHandResult(hands.length ? hands : null);
+  video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+}
+
+function teardownMediaPipeStandard() {
+  mpStdVfcRunning = false;
+  if (mpStdHandLandmarker) { mpStdHandLandmarker.close(); mpStdHandLandmarker = null; }
+  mpStdReady = false;
+}
+
+function startMediaPipeActive() {
+  const modeLabel = mediapipeMode === 'standard' ? 'MediaPipe (Std)' : 'MediaPipe (Wkr)';
+  document.getElementById('backend-label').textContent = modeLabel;
+  if (mediapipeMode === 'standard') {
+    initMediaPipeStandard(2).then(() => {
+      mpStdVfcRunning = true;
+      video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+    });
+  } else {
+    initMediaPipeBackend();
+    startMediaPipeVfcLoop();
+  }
+}
+
+document.getElementById('mediapipe-mode').addEventListener('change', (e) => {
+  mediapipeMode = e.target.value;
+  savePref('mediapipeMode', mediapipeMode);
+  e.target.blur();
+  if (activeBackend !== 'mediapipe' || !video.srcObject) return;
+  teardownMediaPipe();
+  teardownMediaPipeStandard();
+  latestHands = [null, null];
+  startMediaPipeActive();
+});
 
 // ============================================================
 // Backend switching
@@ -987,26 +1219,25 @@ function syncInterpAvailability() {
 
 async function setBackend(backend) {
   activeBackend = backend;
-  document.getElementById('backend-label').textContent = backend === 'webgpu' ? 'WebGPU' : 'MediaPipe';
   latestHands = [null, null];
 
   if (backend === 'webgpu') {
     stopMediaPipeVfcLoop();
+    teardownMediaPipeStandard();
+    document.getElementById('backend-label').textContent = 'WebGPU';
     const ok = await initWebGPUBackend();
     if (!ok) {
       console.warn('WebGPU unavailable, falling back to MediaPipe');
       backendSelect.value = 'mediapipe';
       activeBackend = 'mediapipe';
-      document.getElementById('backend-label').textContent = 'MediaPipe';
-      initMediaPipeBackend();
-      startMediaPipeVfcLoop();
+      startMediaPipeActive();
     }
   } else {
     stopWebGPUVfcLoop();
-    initMediaPipeBackend();
-    startMediaPipeVfcLoop();
+    startMediaPipeActive();
   }
   syncInterpAvailability();
+  syncMediaPipeModeVisibility();
 }
 
 backendSelect.addEventListener('change', (e) => { setBackend(e.target.value); savePref('backend', e.target.value); });
@@ -1024,9 +1255,11 @@ async function startCamera() {
   await new Promise(r => { video.onloadedmetadata = r; });
   video.play();
   document.getElementById('self-view').style.display = 'block';
-  document.getElementById('controls').style.display = 'block';
+  document.getElementById('hamburger-btn').style.display = 'flex';
+  overlayCanvas.width = video.videoWidth;
+  overlayCanvas.height = video.videoHeight;
   statusEl.style.display = 'none';
-  await setBackend('webgpu');
+  await setBackend(activeBackend);
 }
 startBtn.addEventListener('click', startCamera);
 window.addEventListener('keydown', (e) => {
@@ -1040,11 +1273,18 @@ document.addEventListener('visibilitychange', () => {
     tabVisible = false;
     stopWebGPUVfcLoop();
     stopMediaPipeVfcLoop();
+    mpStdVfcRunning = false;
   } else {
     tabVisible = true;
     lastAnimateTime = performance.now();
-    if (activeBackend === 'webgpu') startWebGPUVfcLoop();
-    else startMediaPipeVfcLoop();
+    if (activeBackend === 'webgpu') {
+      startWebGPUVfcLoop();
+    } else if (mediapipeMode === 'standard') {
+      mpStdVfcRunning = true;
+      video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+    } else {
+      startMediaPipeVfcLoop();
+    }
   }
 });
 
@@ -1085,6 +1325,9 @@ function animate() {
   updateHand(handGroups[0], interp0);
   updateHand(handGroups[1], interp1);
 
+  // 2D skeleton overlay on self-view
+  drawOverlay([interp0, interp1]);
+
   const pulse = 0.6 + 0.4 * Math.sin(now * 0.003);
   waveDisplayMaterial.uniforms.uOpacity.value = 0.7 + 0.4 * pulse;
   for (const g of handGroups) {
@@ -1103,7 +1346,7 @@ function animate() {
     const tips = FINGERTIPS.map(i => hands[h][i].z.toFixed(3));
     zParts.push(`H${h}: w=${wZ} t=[${tips.join(', ')}]`);
   }
-  document.getElementById('hand-z').textContent = zParts.length ? zParts.join(' | ') : '--';
+  // document.getElementById('hand-z').textContent = zParts.length ? zParts.join(' | ') : '--';
 
   frameCount++;
   if (now - lastFpsTime > 500) {

@@ -25,7 +25,7 @@
   #hud .pinch { color: #ff6d00; }
   #hud .open { color: #4fc3f7; }
   #start-logo {
-    position: fixed; top: calc(58% + 48px); left: 50%;
+    position: fixed; top: calc(58% + 88px); left: 50%;
     transform: translate(-50%, calc(-50% - 250px)) scale(1.4);
     width: 512px; height: 512px;
     z-index: 19; pointer-events: none;
@@ -40,7 +40,7 @@
      with no blur, sharp corners, Press Start 2P pixel font. Hover and active
      states press the button toward its shadow in chunky steps. */
   #start-btn {
-    position: fixed; top: calc(58% + 96px); left: 50%; transform: translate(-50%, -50%);
+    position: fixed; top: calc(58% + 136px); left: 50%; transform: translate(-50%, -50%);
     z-index: 20;
     width: 240px;          /* fixed so the button doesn't reflow when the */
     height: 60px;          /* Press Start 2P web font finishes loading async */
@@ -145,26 +145,38 @@
     color: #4fc3f7; font-weight: 600; font-size: 0.95rem;
     margin-top: 0; margin-bottom: 4px;
   }
-  #interp-controls .param-row { display: flex; align-items: center; margin-bottom: 3px; }
+  #interp-controls .param-row { display: flex; align-items: center; margin-bottom: 4px; }
   #interp-controls .param-name { width: 90px; color: #888; font-size: 0.85rem; }
   #interp-controls input[type="range"] { flex: 1; height: 4px; accent-color: #4fc3f7; cursor: pointer; }
   #interp-controls .param-val { width: 42px; text-align: right; color: #4fc3f7; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
   #filter-controls .section-label {
     color: #4fc3f7; font-weight: 600; font-size: 0.95rem;
-    margin-top: 8px; margin-bottom: 4px;
+    margin-top: 10px; margin-bottom: 5px;
+    padding-top: 8px;
+    border-top: 1px solid #333;
   }
-  #filter-controls .section-label:first-child { margin-top: 0; }
+  #filter-controls .section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
   #filter-controls .param-row {
-    display: flex; align-items: center; margin-bottom: 3px;
+    display: flex; align-items: center; margin-bottom: 4px;
   }
   #filter-controls .param-name {
     width: 90px; color: #888; font-size: 0.85rem;
+  }
+  .param-name[data-tip] {
+    cursor: help; text-decoration: underline dotted #555;
+  }
+  #tip-float {
+    position: fixed; z-index: 10000; pointer-events: none;
+    background: #222; color: #ccc; font-size: 0.7rem; padding: 3px 6px;
+    border-radius: 3px; border: 1px solid #444;
+    white-space: nowrap; display: none;
   }
   #filter-controls input[type="range"] {
     flex: 1; height: 4px; accent-color: #4fc3f7; cursor: pointer;
   }
   #filter-controls .param-val {
     width: 40px; text-align: right; color: #4fc3f7; font-size: 0.8rem; font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   #self-view {
     position: fixed; bottom: 16px; right: 16px; z-index: 10;
@@ -226,7 +238,8 @@
   /* When reparented into the drawer, panels become normal block children. */
   #settings-drawer > #filter-controls,
   #settings-drawer > #interp-controls,
-  #settings-drawer > #tracking-controls {
+  #settings-drawer > #tracking-controls,
+  #settings-drawer > #mediapipe-mode-controls {
     position: static; top: auto; right: auto;
     display: block; margin: 0 0 14px 0; background: transparent;
     border: none; border-radius: 0; padding: 0;
@@ -240,6 +253,7 @@
     background: rgba(10,10,26,0.92); padding: 10px 14px; border-radius: 6px;
     border: 1px solid #333; display: none; min-width: 220px;
   }
+  #settings-drawer .param-row { margin-bottom: 6px; }
   #settings-drawer > *:last-child { margin-bottom: 0; }
 </style>
 </head>
@@ -288,6 +302,7 @@
 
 <button id="hamburger-btn" title="Settings (press ~)">☰</button>
 <div id="settings-drawer"></div>
+<div id="tip-float"></div>
 
 <div id="controls">
   <span style="color:#888;">Backend</span>
@@ -308,12 +323,11 @@
   </select>
   <span class="sep" style="color:#888;">Gesture</span>
   <select id="gesture-mode-select">
-    <option value="grab" selected>Grab</option>
-    <option value="pinch">Pinch</option>
+    <option value="grab">Grab</option>
+    <option value="pinch" selected>Pinch</option>
   </select>
   <button id="reset-cubes-btn" style="margin-left:10px; background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 10px; font-size:0.9rem; cursor:pointer;">Reset Cubes</button>
-  <button id="record-world-btn" style="margin-left:10px; background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 10px; font-size:0.9rem; cursor:pointer;">Record World</button>
-  <span class="sep" style="color:#888;">Z Mode</span>
+<span class="sep" style="color:#888;">Z Mode</span>
   <select id="z-mode-select">
     <option value="ball">Ball</option>
     <option value="hand">Hand Translation</option>
@@ -321,28 +335,39 @@
   </select>
 </div>
 
+<div id="mediapipe-mode-controls" style="display:none;">
+  <div class="section-label" style="color:#4fc3f7; font-weight:600; font-size:0.95rem; margin-bottom:4px;">MediaPipe</div>
+  <div class="param-row" style="display:flex; align-items:center; margin-bottom:3px;"><span class="param-name" style="width:90px; color:#888; font-size:0.85rem;">Mode</span><select id="mediapipe-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="workers">Workers</option><option value="standard">Standard (main thread)</option></select></div>
+</div>
+
 <div id="filter-controls">
   <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">Head <button id="recenter-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:2px 8px; font-size:0.75rem; cursor:pointer; font-weight:400;">Recenter</button></div>
   <div class="param-row" style="margin-top:6px;"><span class="param-name">Model</span><select id="face-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="landmark">Landmark (478pt, precise)</option><option value="detector">Detector (6pt, fast)</option></select></div>
+  <div class="param-row"><span class="param-name">Precision</span><select id="face-precision" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="f32">f32</option><option value="f16" selected>f16</option></select></div>
+  <div class="param-row"><span class="param-name">Show Crop</span><input type="checkbox" id="show-crop-input" style="accent-color:#4fc3f7;"></div>
   <div class="param-row" style="margin-top:4px;"><span class="param-name">ROI</span><select id="face-roi" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="auto">Auto (center only)</option><option value="off">Off (full frame)</option><option value="on">On (always crop)</option></select></div>
-  <div class="param-row" style="margin-top:6px;"><span class="param-name">Floor</span><input type="range" id="head-floor" min="1" max="1000" step="1" value="146"><span class="param-val" id="head-floor-val">0.146</span></div>
-  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="head-beta" min="0" max="500" step="5" value="460"><span class="param-val" id="head-beta-val">46.0</span></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">Filter</span><select id="head-filter-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="none">None (raw)</option><option value="one-euro" selected>1-Euro</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="Min cutoff. Lower = smoother, higher = more responsive">Floor</span><input type="range" id="head-floor" min="50" max="10000" step="50" value="3050"><span class="param-val" id="head-floor-val">3.05</span></div>
+  <div class="param-row"><span class="param-name" data-tip="Speed sensitivity. Lower = steady, higher = reacts to fast movement">Beta</span><input type="range" id="head-beta" min="0" max="1000" step="5" value="505"><span class="param-val" id="head-beta-val">50.5</span></div>
   <div class="section-label" style="margin-top:6px;">Parallax</div>
   <div class="param-row"><span class="param-name">Amount</span><input type="range" id="parallax-amount" min="0" max="2" step="0.05" value="0.6"><span class="param-val" id="parallax-amount-val">0.60</span></div>
   <div class="param-row"><span class="param-name">Depth</span><input type="range" id="parallax-depth" min="15" max="80" step="1" value="20"><span class="param-val" id="parallax-depth-val">20</span></div>
   <div class="section-label">Hands</div>
-  <div class="param-row"><span class="param-name">Floor</span><input type="range" id="hand-floor" min="1" max="1000" step="1" value="100"><span class="param-val" id="hand-floor-val">0.100</span></div>
-  <div class="param-row"><span class="param-name">Beta</span><input type="range" id="hand-beta" min="0" max="500" step="5" value="200"><span class="param-val" id="hand-beta-val">20.0</span></div>
-  <div class="param-row" style="margin-top:6px;"><span class="param-name">PinchThresh</span><input type="range" id="pinch-thresh" min="0.01" max="0.10" step="0.005" value="0.05"><span class="param-val" id="pinch-thresh-val">0.050</span></div>
-  <div class="param-row"><span class="param-name">HandConf</span><input type="range" id="hand-conf-thresh" min="0" max="1" step="0.05" value="0.30"><span class="param-val" id="hand-conf-thresh-val">0.30</span></div>
-  <div class="param-row"><span class="param-name">Model</span><select id="model-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="4mb-f32" selected>4MB f32</option><option value="4mb-f16">4MB f16</option><option value="10mb-f32">10MB f32</option><option value="10mb-f16">10MB f16</option></select></div>
-  <div class="param-row"><span class="param-name">OpenFrames</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="Palm detection engine. WGSL = custom shaders, ORT = ONNX Runtime">Palm</span><select id="palm-engine-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="ort" selected>ORT</option><option value="wgsl">WGSL</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="Standard (1M, faster) or Large (2.6M, better pinch/thumb)">Model</span><select id="model-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="standard" selected>Standard</option><option value="large">Large</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="f32 = standard. f16 = optimized, smaller and faster">Precision</span><select id="precision-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="f32" selected>f32</option><option value="f16">f16</option></select></div>
+  <div class="param-row"><span class="param-name">Filter</span><select id="hand-filter-mode" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="none">None (raw)</option><option value="one-euro" selected>1-Euro</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="Min cutoff. Lower = smoother, higher = more responsive">Floor</span><input type="range" id="hand-floor" min="50" max="10000" step="50" value="2500"><span class="param-val" id="hand-floor-val">2.50</span></div>
+  <div class="param-row"><span class="param-name" data-tip="Speed sensitivity. Lower = steady, higher = reacts to fast movement">Beta</span><input type="range" id="hand-beta" min="0" max="1000" step="5" value="605"><span class="param-val" id="hand-beta-val">60.5</span></div>
+  <div class="param-row" style="margin-top:6px;"><span class="param-name">PinchThresh</span><input type="range" id="pinch-thresh" min="1" max="10" step="0.5" value="6"><span class="param-val" id="pinch-thresh-val">0.060</span></div>
+  <div class="param-row"><span class="param-name">Axes</span><label style="flex:1; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="show-axes" style="accent-color:#4fc3f7; cursor:pointer;"><span style="color:#888; font-size:0.75rem;">Show orientation</span></label></div>
+  <div class="param-row"><span class="param-name" data-tip="Frames hand must be open before releasing a grabbed object">OpenFrames</span><select id="open-thresh" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></div>
   <div style="text-align:right; margin-top:8px;"><button id="copy-settings-btn" style="background:#222; color:#4fc3f7; border:1px solid #444; border-radius:4px; padding:3px 10px; font-size:0.8rem; cursor:pointer;">Copy Settings</button></div>
 </div>
 
 <div id="interp-controls">
   <div class="section-label">Frame Interp</div>
-  <div class="param-row"><span class="param-name">Mode</span><select id="interp-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1x (off)</option><option value="2">2x</option><option value="4">4x</option><option value="adaptive">Adaptive</option></select></div>
+  <div class="param-row"><span class="param-name" data-tip="Interpolate between inference frames. Adaptive adjusts by hand speed">Mode</span><select id="interp-select" style="flex:1; background:#222; color:#ccc; border:1px solid #444; border-radius:3px; padding:1px 4px; font-size:0.75rem;"><option value="1">1x (off)</option><option value="2">2x</option><option value="4">4x</option><option value="adaptive" selected>Adaptive</option></select></div>
   <div id="interp-zones" style="display:flex; gap:14px; margin-top:8px; justify-content:center; align-items:flex-end;">
     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
       <div id="boxes-head" style="display:flex; flex-direction:column-reverse; gap:2px; height:42px;"></div>
@@ -360,8 +385,9 @@
 </div>
 
 <div id="tracking-controls" style="display:none;">
-  <div class="section-label" style="color:#4fc3f7; font-weight:600; font-size:0.95rem; margin-bottom:4px;">Hand Tracking</div>
-  <div class="param-row" style="display:flex; align-items:center; margin-bottom:3px;"><span class="param-name" style="width:90px; color:#888; font-size:0.85rem;">Dup dist</span><input type="range" id="dup-dist" min="5" max="80" step="1" value="25" style="flex:1; height:4px; accent-color:#4fc3f7; cursor:pointer;"><span class="param-val" id="dup-dist-val" style="width:40px; text-align:right; color:#4fc3f7; font-size:0.8rem; font-weight:600;">25</span></div>
+  <div class="section-label" style="color:#4fc3f7; font-weight:600; font-size:0.95rem; margin-bottom:5px; padding-top:8px; border-top:1px solid #333;">Palm Detection</div>
+  <div class="param-row" style="display:flex; align-items:center; margin-bottom:4px;"><span class="param-name" style="width:90px; color:#888; font-size:0.85rem;">HandConf</span><input type="range" id="hand-conf-thresh" min="0" max="1" step="0.05" value="0.45" style="flex:1; height:4px; accent-color:#4fc3f7; cursor:pointer;"><span class="param-val" id="hand-conf-thresh-val" style="width:40px; text-align:right; color:#4fc3f7; font-size:0.8rem; font-weight:600;">0.45</span></div>
+  <div class="param-row" style="display:flex; align-items:center; margin-bottom:4px;"><span class="param-name" style="width:90px; color:#888; font-size:0.85rem;">Dup dist</span><input type="range" id="dup-dist" min="5" max="80" step="1" value="25" style="flex:1; height:4px; accent-color:#4fc3f7; cursor:pointer;"><span class="param-val" id="dup-dist-val" style="width:40px; text-align:right; color:#4fc3f7; font-size:0.8rem; font-weight:600;">25</span></div>
   <div style="font-size:0.7rem; color:#666; margin-top:2px;">px at which two slots count as duplicate</div>
 </div>
 
@@ -399,6 +425,7 @@
 <!-- Enable crossOriginIsolated on hosts without COOP/COEP headers (e.g. GitHub Pages).
      Registered from the repo root so its scope covers /src/ and /vendor/ (worker files). -->
 <script src="../../coi-serviceworker.js"></script>
+<!-- mediapipe-vision.js loaded on demand when user switches to MediaPipe backend -->
 
 <script type="importmap">
 { "imports": {
@@ -412,10 +439,23 @@
 import * as THREE from 'three';
 import { log } from '../../src/log-gates.js';
 
+let _mpLoaded = null;
+function loadMediaPipeVision() {
+  if (_mpLoaded) return _mpLoaded;
+  _mpLoaded = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'mediapipe-vision.js';
+    s.onload = () => resolve(window.$mediapipe);
+    s.onerror = () => reject(new Error('Failed to load mediapipe-vision.js'));
+    document.head.appendChild(s);
+  });
+  return _mpLoaded;
+}
+
 // ============================================================
 // Settings: persisted in localStorage, restored on refresh
 // ============================================================
-const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'landmark', faceRoi: 'auto', interpolation: '1', handModel: '4mb-f32' };
+const DEFAULTS = { backend: 'webgpu', parallax: 'relative', numHands: '2', faceMode: 'landmark', facePrecision: 'f16', faceRoi: 'auto', interpolation: 'adaptive', handModel: 'standard-f16', zMode: 'off', gestureMode: 'pinch', pinchThresh: '0.06', mediapipeMode: 'standard', handConfThresh: '0.45', palmEngine: 'ort' };
 function getSetting(key) { const v = localStorage.getItem(key); return v !== null ? v : DEFAULTS[key]; }
 function setSetting(key, val) { localStorage.setItem(key, val); }
 
@@ -427,7 +467,7 @@ function setSetting(key, val) { localStorage.setItem(key, val); }
 // lifted into the active profile without loss; the flat key is shadowed once
 // the slider is touched in that profile.
 const PROFILE_DEFAULTS = {
-  'webgpu:landmark':   { 'head-floor': 0.146, 'head-beta': 46,  'hand-floor': 0.1,   'hand-beta': 20,   'parallax-amount': 0.6, 'parallax-depth': 20 },
+  'webgpu:landmark':   { 'head-floor': 3.0, 'head-beta': 50.0,  'hand-floor': 3.0,   'hand-beta': 55.5,   'parallax-amount': 0.6, 'parallax-depth': 20 },
   'webgpu:detector':   { 'head-floor': 0.03,  'head-beta': 5.5, 'hand-floor': 0.001, 'hand-beta': 33,   'parallax-amount': 0.6, 'parallax-depth': 20 },
   'mediapipe:landmark':{ 'head-floor': 0.1,   'head-beta': 3.5, 'hand-floor': 0.1,   'hand-beta': 26.5, 'parallax-amount': 0.7, 'parallax-depth': 20 },
   'mediapipe:detector': { 'head-floor': 0.04,  'head-beta': 3.9, 'hand-floor': 0.1,   'hand-beta': 32,   'parallax-amount': 0.7, 'parallax-depth': 20 },
@@ -466,6 +506,13 @@ function setProfileValue(field, value) {
   localStorage.setItem(currentProfileKey(), JSON.stringify(p));
 }
 
+// MediaPipe mode: 'workers' (off main thread) or 'standard' (main thread)
+let mediapipeMode = getSetting('mediapipeMode') || 'standard';
+function syncMediaPipeModeVisibility() {
+  const el = document.getElementById('mediapipe-mode-controls');
+  if (el) el.style.display = activeBackend === 'mediapipe' ? 'block' : 'none';
+}
+
 // Restore UI from settings
 const backendSelect = document.getElementById('backend-select');
 const parallaxSelect = document.getElementById('parallax-select');
@@ -474,7 +521,11 @@ const numHandsSelect = document.getElementById('num-hands-select');
 backendSelect.value = getSetting('backend');
 parallaxSelect.value = getSetting('parallax');
 numHandsSelect.value = getSetting('numHands');
-document.getElementById('model-select').value = getSetting('handModel');
+const savedHandModel = getSetting('handModel') || 'standard-f32';
+const [savedModelSize, savedPrecision] = savedHandModel.split('-');
+document.getElementById('model-select').value = savedModelSize;
+document.getElementById('precision-select').value = savedPrecision;
+document.getElementById('mediapipe-mode').value = mediapipeMode;
 
 // ============================================================
 // 3D Scene Setup
@@ -605,29 +656,6 @@ document.getElementById('reset-cubes-btn').addEventListener('click', () => {
   spawnCubes();
 });
 
-// World landmark recording
-const worldRecording = [];
-let worldRecording_active = false;
-const recordBtn = document.getElementById('record-world-btn');
-recordBtn.addEventListener('click', () => {
-  if (!worldRecording_active) {
-    worldRecording.length = 0;
-    worldRecording_active = true;
-    recordBtn.textContent = 'Stop & Download';
-    recordBtn.style.color = '#ff4444';
-  } else {
-    worldRecording_active = false;
-    recordBtn.textContent = 'Record World';
-    recordBtn.style.color = '#4fc3f7';
-    const blob = new Blob([JSON.stringify(worldRecording, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `world-landmarks-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-});
 
 // Projectile pool
 const projectiles = [];
@@ -711,23 +739,51 @@ const zBalls = zBallMats.map(mat => {
   return m;
 });
 
-let zMode = 'ball';
-document.getElementById('z-mode-select').addEventListener('change', (e) => { zMode = e.target.value; });
+let zMode = getSetting('zMode');
+document.getElementById('z-mode-select').value = zMode;
+document.getElementById('z-mode-select').addEventListener('change', (e) => { zMode = e.target.value; setSetting('zMode', zMode); });
 
-document.getElementById('model-select').addEventListener('change', async (e) => {
-  const variant = e.target.value;
+function getHandVariant() {
+  return document.getElementById('model-select').value + '-' + document.getElementById('precision-select').value;
+}
+async function handleModelChange() {
+  const variant = getHandVariant();
   if (!gpuHandTracker) return;
-  const sel = e.target;
-  sel.disabled = true;
+  const modelSel = document.getElementById('model-select');
+  const precSel = document.getElementById('precision-select');
+  modelSel.disabled = precSel.disabled = true;
   try {
     await gpuHandTracker.switchModel(variant);
     setSetting('handModel', variant);
     log('lifecycle', `[model-select] switched to ${variant}`);
   } catch (err) {
     console.error('[model-select] switch failed:', err);
-    sel.value = getSetting('handModel');
+    const prev = getSetting('handModel') || 'standard-f32';
+    const [s, p] = prev.split('-');
+    modelSel.value = s; precSel.value = p;
   } finally {
-    sel.disabled = false;
+    modelSel.disabled = precSel.disabled = false;
+  }
+}
+document.getElementById('model-select').addEventListener('change', handleModelChange);
+document.getElementById('precision-select').addEventListener('change', handleModelChange);
+
+// Palm engine toggle (ORT vs WGSL)
+const palmEngineSel = document.getElementById('palm-engine-select');
+palmEngineSel.value = getSetting('palmEngine') || 'ort';
+palmEngineSel.addEventListener('change', async (e) => {
+  const engine = e.target.value;
+  if (!gpuHandTracker) return;
+  palmEngineSel.disabled = true;
+  try {
+    await gpuHandTracker.switchPalmEngine(engine);
+    setSetting('palmEngine', engine);
+    log('lifecycle', `[palm-engine] switched to ${engine}`);
+  } catch (err) {
+    console.error('[palm-engine] switch failed:', err);
+    e.target.value = getSetting('palmEngine') || 'ort';
+  } finally {
+    palmEngineSel.disabled = false;
   }
 });
 
@@ -873,6 +929,19 @@ const filterParams = {
   hand: { floor: getFilter('hand-floor'), beta: getFilter('hand-beta') },
 };
 
+let headFilterMode = getSetting('headFilterMode') || 'one-euro';
+let handFilterMode = getSetting('handFilterMode') || 'one-euro';
+document.getElementById('head-filter-mode').value = headFilterMode;
+document.getElementById('hand-filter-mode').value = handFilterMode;
+document.getElementById('head-filter-mode').addEventListener('change', (e) => {
+  headFilterMode = e.target.value;
+  setSetting('headFilterMode', headFilterMode);
+});
+document.getElementById('hand-filter-mode').addEventListener('change', (e) => {
+  handFilterMode = e.target.value;
+  setSetting('handFilterMode', handFilterMode);
+});
+
 // Head filters: x, y, z (dCutoff fixed at 1.0)
 const headFilters = ['x', 'y', 'z'].map(() =>
   new OneEuroFilter(60, filterParams.head.floor, filterParams.head.beta, 1.0)
@@ -911,7 +980,7 @@ function updateFilterParams(group, param, value) {
 // previous 0.01 minimum.
 const FLOOR_DIVISOR = 1000;
 const BETA_DIVISOR  = 10;
-const formatFloor = v => v.toFixed(3);
+const formatFloor = v => v.toFixed(2);
 const formatBeta  = v => v.toFixed(1);
 
 for (const group of ['head', 'hand']) {
@@ -951,9 +1020,21 @@ document.getElementById('recenter-btn').addEventListener('click', () => {
 // Copy settings button
 document.getElementById('copy-settings-btn').addEventListener('click', () => {
   const settings = {
-    head: { floor: filterParams.head.floor, beta: filterParams.head.beta },
-    parallax: { amount: parallaxAmount, depth: parallaxDepth },
-    hands: { floor: filterParams.hand.floor, beta: filterParams.hand.beta },
+    backend: activeBackend,
+    mediapipeMode,
+    head: { filter: headFilterMode, floor: filterParams.head.floor, beta: filterParams.head.beta },
+    parallax: { amount: parallaxAmount, depth: parallaxDepth, mode: parallaxMode },
+    hands: { filter: handFilterMode, floor: filterParams.hand.floor, beta: filterParams.hand.beta },
+    faceMode,
+    facePrecision: getSetting('facePrecision'),
+    faceRoi,
+    interpolation: interpolationMode,
+    handModel: getSetting('handModel'),
+    gestureMode,
+    zMode,
+    pinchThreshold,
+    openThresh,
+    handConfThreshold: parseFloat(document.getElementById('hand-conf-thresh').value),
   };
   navigator.clipboard.writeText(JSON.stringify(settings, null, 2));
   const btn = document.getElementById('copy-settings-btn');
@@ -1322,9 +1403,13 @@ function handleFaceResult(face) {
   const rawY = headRaw.y - oy;
   const rawZ = headRaw.z - oz;
 
-  headPos.x = headFilters[0].filter(rawX, now);
-  headPos.y = headFilters[1].filter(rawY, now);
-  headPos.z = headFilters[2].filter(rawZ, now);
+  if (headFilterMode === 'none') {
+    headPos.x = rawX; headPos.y = rawY; headPos.z = rawZ;
+  } else {
+    headPos.x = headFilters[0].filter(rawX, now);
+    headPos.y = headFilters[1].filter(rawY, now);
+    headPos.z = headFilters[2].filter(rawZ, now);
+  }
   // Compute head motion speed (frame-to-frame |Δposition|) and feed it
   // through an exponential smoother so the chosen interp mode is stable.
   let headSpeed = 0;
@@ -1451,23 +1536,16 @@ function handleHandResult(hands, opts = {}) {
         ` wrist=${cm(wl[0])} idx=${cm(wl[5])} pnk=${cm(wl[17])} mid=${cm(wl[9])}`
       );
     }
-    // Filter each landmark
-    const filtered = hand.map((lm, j) => ({
-      x: handFilters[h][j][0].filter(lm.x, now),
-      y: handFilters[h][j][1].filter(lm.y, now),
-      z: handFilters[h][j][2].filter(lm.z, now),
-    }));
+    const filtered = handFilterMode === 'none'
+      ? hand.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }))
+      : hand.map((lm, j) => ({
+          x: handFilters[h][j][0].filter(lm.x, now),
+          y: handFilters[h][j][1].filter(lm.y, now),
+          z: handFilters[h][j][2].filter(lm.z, now),
+        }));
     currentHands[h] = filtered;
     currentWorldHands[h] = (wl && wl.length > 0) ? wl : null;
 
-    if (worldRecording_active && wl && wl.length > 0) {
-      worldRecording.push({
-        t: now,
-        hand: h,
-        normalized: hand.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
-        world: wl.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
-      });
-    }
 
     // Palm orientation from world landmarks (true 3D in meters).
     // World coords: x = right, y = down(?), z = toward camera(?).
@@ -1511,7 +1589,7 @@ function handleHandResult(hands, opts = {}) {
       const bestRatio = Math.max(ratioW, ratioH);
       if (refPalmSize[h] === 0) refPalmSize[h] = bestRatio;
       const rawHandZ = -((bestRatio / refPalmSize[h]) - 1);
-      handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+      handZPos[h] = handFilterMode === 'none' ? rawHandZ : handZFilters[h].filter(rawHandZ, now);
 
       if (h === 0 && (!handleHandResult._lastZLog || now - handleHandResult._lastZLog > 500)) {
         handleHandResult._lastZLog = now;
@@ -1535,7 +1613,7 @@ function handleHandResult(hands, opts = {}) {
       const bestRatio = Math.max(ratioW, ratioH);
       if (refPalmSize[h] === 0) refPalmSize[h] = bestRatio;
       const rawHandZ = -((bestRatio / refPalmSize[h]) - 1);
-      handZPos[h] = handZFilters[h].filter(rawHandZ, now);
+      handZPos[h] = handFilterMode === 'none' ? rawHandZ : handZFilters[h].filter(rawHandZ, now);
     }
     handConf[h] = entry.handFlag || 0;
 
@@ -1807,6 +1885,101 @@ function teardownMediaPipe() {
 }
 
 // ============================================================
+// BACKEND: MediaPipe (main thread / standard)
+// ============================================================
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm';
+const MP_DETECTOR_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+const MP_LANDMARKER_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const MP_HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task';
+
+let mpStdFaceDetector = null, mpStdFaceLandmarker = null, mpStdHandLandmarker = null;
+let mpStdReady = false;
+let mpStdVfcRunning = false;
+
+async function initMediaPipeStandard(numHands) {
+  if (mpStdReady) return;
+  const mp = await loadMediaPipeVision();
+  const vision = await mp.FilesetResolver.forVisionTasks(WASM_URL);
+  // MediaPipe's GPU delegate needs a canvas with a WebGL context. Each task
+  // runner must get its own canvas (they can't share a GL context).
+  const mpCanvas = () => document.createElement('canvas');
+  const [det, lm, hand] = await Promise.all([
+    mp.FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: MP_DETECTOR_MODEL, delegate: 'GPU' },
+      runningMode: 'VIDEO', minDetectionConfidence: 0.3,
+      canvas: mpCanvas(),
+    }),
+    mp.FaceLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: MP_LANDMARKER_MODEL, delegate: 'GPU' },
+      runningMode: 'VIDEO', numFaces: 1,
+      minFaceDetectionConfidence: 0.3, outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: false,
+      canvas: mpCanvas(),
+    }),
+    mp.HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: MP_HAND_MODEL, delegate: 'GPU' },
+      runningMode: 'VIDEO', numHands: numHands || 1,
+      minHandDetectionConfidence: 0.3, minTrackingConfidence: 0.3,
+      canvas: mpCanvas(),
+    }),
+  ]);
+  mpStdFaceDetector = det;
+  mpStdFaceLandmarker = lm;
+  mpStdHandLandmarker = hand;
+  mpStdReady = true;
+  updateStatus();
+}
+
+function sendMediaPipeStandardFrames() {
+  if (!mpStdVfcRunning) return;
+  if (document.hidden) { video.requestVideoFrameCallback(sendMediaPipeStandardFrames); return; }
+  if (!mpStdReady) { video.requestVideoFrameCallback(sendMediaPipeStandardFrames); return; }
+  const now = performance.now();
+
+  let face = null;
+  if (faceMode === 'landmark' && mpStdFaceLandmarker) {
+    const r = mpStdFaceLandmarker.detectForVideo(video, now);
+    if (r.faceLandmarks && r.faceLandmarks.length > 0) {
+      const lm = r.faceLandmarks[0];
+      face = { keypoints: [{ x: lm[263].x, y: lm[263].y }, { x: lm[33].x, y: lm[33].y }] };
+    }
+  } else if (mpStdFaceDetector) {
+    const r = mpStdFaceDetector.detectForVideo(video, now);
+    if (r.detections && r.detections.length > 0) {
+      face = { keypoints: r.detections[0].keypoints.map(k => ({ x: k.x, y: k.y })) };
+    }
+  }
+  _bench.faceLatencies.push(performance.now() - now);
+  handleFaceResult(face);
+
+  let hands = null;
+  const handNow = performance.now();
+  if (mpStdHandLandmarker) {
+    const r = mpStdHandLandmarker.detectForVideo(video, handNow);
+    if (r.landmarks && r.landmarks.length > 0) {
+      hands = r.landmarks.map((hand, i) => ({
+        landmarks: hand.map(p => ({ x: p.x, y: p.y, z: p.z })),
+        handedness: r.handednesses?.[i]?.[0]?.categoryName || null,
+      }));
+    }
+  }
+  _bench.handLatencies.push(performance.now() - handNow);
+  _bench.handCounts.push(hands ? hands.filter(Boolean).length : 0);
+  handleHandResult(hands);
+
+  _bench.report(performance.now());
+  video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+}
+
+function teardownMediaPipeStandard() {
+  mpStdVfcRunning = false;
+  if (mpStdFaceDetector) { mpStdFaceDetector.close(); mpStdFaceDetector = null; }
+  if (mpStdFaceLandmarker) { mpStdFaceLandmarker.close(); mpStdFaceLandmarker = null; }
+  if (mpStdHandLandmarker) { mpStdHandLandmarker.close(); mpStdHandLandmarker = null; }
+  mpStdReady = false;
+}
+
+// ============================================================
 // BACKEND: WebGPU (gpu-vision)
 // ============================================================
 let gpuHandTracker = null;
@@ -1858,15 +2031,19 @@ async function initWebGPUBackend(silent = false) {
       if (Number.isFinite(savedDup) && savedDup > 0) gpuHandTracker.dupDistPx = savedDup;
       const savedConf = parseFloat(getSetting('handConfThresh'));
       if (Number.isFinite(savedConf)) gpuHandTracker.handFlagThreshold = savedConf;
-      setStatus('Loading WebGPU hand tracker...');
-      await gpuHandTracker.init(setStatus);
-      const savedModel = getSetting('handModel');
-      if (savedModel && savedModel !== '4mb-f32') {
-        setStatus(`Switching to ${savedModel}...`);
-        await gpuHandTracker.switchModel(savedModel);
+      let savedModel = getSetting('handModel');
+      const legacyMap = { '4mb-f32': 'standard-f32', '4mb-f16': 'standard-f16', '10mb-f32': 'large-f32', '10mb-f16': 'large-f16', '2mb-f16': 'standard-f16' };
+      if (legacyMap[savedModel]) { savedModel = legacyMap[savedModel]; setSetting('handModel', savedModel); }
+      const handVariant = savedModel || 'standard-f16';
+      setStatus(`Loading WebGPU hand tracker (${handVariant})...`);
+      await gpuHandTracker.init(setStatus, { variant: handVariant });
+      const savedPalmEngine = getSetting('palmEngine');
+      if (savedPalmEngine === 'wgsl') {
+        setStatus('Switching palm detection to WGSL engine...');
+        await gpuHandTracker.switchPalmEngine('wgsl');
       }
       setStatus('Loading WebGPU face tracker...');
-      await gpuFaceTracker.init(setStatus);
+      await gpuFaceTracker.init(setStatus, { f16: getSetting('facePrecision') === 'f16' });
       gpuReady = true;
       if (silent) log('lifecycle', '[preload] ready');
       return true;
@@ -1892,7 +2069,7 @@ const _bench = {
   report(now) {
     if (now - this.lastReport < this.interval) return;
     this.lastReport = now;
-    const backendTag = activeBackend === 'webgpu' ? 'WGPU' : 'MP';
+    const backendTag = activeBackend === 'webgpu' ? 'WGPU' : mediapipeMode === 'standard' ? 'MP-Std' : 'MP-Wkr';
     if (this.handLatencies.length > 0) {
       const sorted = [...this.handLatencies].sort((a,b) => a - b);
       const mean = sorted.reduce((a,b) => a+b,0) / sorted.length;
@@ -1902,8 +2079,9 @@ const _bench = {
         ? this.handCounts.reduce((a,b) => a+b,0) / this.handCounts.length
         : 0;
       const handsTag = hc === 0 ? '0h' : hc >= 1.95 ? '2h' : hc <= 0.05 ? '0h' : `${hc.toFixed(1)}h`;
-      const modelTag = getSetting('handModel') || '4mb-f32';
-      log('bench', `[BENCH] ${backendTag} Hand[${modelTag}] (${handsTag}): ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      const modelTag = activeBackend === 'webgpu' ? (getSetting('handModel') || 'standard-f32') : '';
+      const handLabel = modelTag ? `Hand[${modelTag}]` : 'Hand';
+      log('bench', `[BENCH] 👋 ${backendTag} ${handLabel} (${handsTag}): ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     if (this.faceLatencies.length > 0) {
       const sorted = [...this.faceLatencies].sort((a,b) => a - b);
@@ -1911,7 +2089,9 @@ const _bench = {
       const max = sorted[sorted.length - 1];
       const p95 = sorted[Math.floor(sorted.length * 0.95)];
       const faceTag = faceMode === 'landmark' ? 'LAN' : 'DET';
-      log('bench', `[BENCH] ${backendTag} Face[${faceTag}]: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
+      const facePrec = activeBackend === 'webgpu' ? (getSetting('facePrecision') || 'f32') : '';
+      const faceLabel = facePrec ? `Face[${faceTag}:${facePrec}]` : `Face[${faceTag}]`;
+      log('bench', `[BENCH] 🙂 ${backendTag} ${faceLabel}: ${mean.toFixed(1)}ms mean, ${p95.toFixed(1)}ms p95, ${max.toFixed(1)}ms max (${sorted.length} samples)`);
     }
     this.handLatencies = [];
     this.handCounts = [];
@@ -1932,9 +2112,12 @@ const _bench = {
 let wgpuVfcRunning = false;
 let wgpuVfcChainActive = false; // is an rVFC callback currently queued
 function wgpuVfcTick() {
-  if (!wgpuVfcTick._logged) { wgpuVfcTick._logged = true; log('lifecycle', '[lifecycle] wgpuVfcTick first fire'); }
+  if (!wgpuVfcTick._n) wgpuVfcTick._n = 0;
+  wgpuVfcTick._n++;
+  const n = wgpuVfcTick._n;
+  if (n <= 2 || n === 10 || n === 50) log('lifecycle', `[lifecycle] wgpuVfcTick #${n} running=${wgpuVfcRunning} gpuReady=${gpuReady} backend=${activeBackend} srcObject=${!!video.srcObject} handBusy=${gpuHandBusy} faceBusy=${gpuFaceBusy}`);
   wgpuVfcChainActive = false;
-  if (!wgpuVfcRunning) return;
+  if (!wgpuVfcRunning) { log('lifecycle', `[lifecycle] wgpuVfcTick #${n} BAIL: not running`); return; }
   if (activeBackend === 'webgpu' && gpuReady) {
     processWebGPUHands();
     processWebGPUFace();
@@ -1942,19 +2125,21 @@ function wgpuVfcTick() {
   if (video.srcObject) {
     wgpuVfcChainActive = true;
     video.requestVideoFrameCallback(wgpuVfcTick);
+  } else {
+    log('lifecycle', `[lifecycle] wgpuVfcTick #${n} CHAIN DEAD: no srcObject`);
   }
 }
 function startWebGPUVfcLoop() {
   wgpuVfcRunning = true;
-  // Only register a new rVFC if no chain is currently active. Multiple calls
-  // (e.g. from preload then again after camera arrives) are idempotent.
   if (!wgpuVfcChainActive && video.srcObject) {
     wgpuVfcChainActive = true;
     log('lifecycle', '[lifecycle] wgpu rVFC chain started');
     video.requestVideoFrameCallback(wgpuVfcTick);
+  } else {
+    log('lifecycle', `[lifecycle] startWebGPUVfcLoop no-op: chainActive=${wgpuVfcChainActive} srcObject=${!!video.srcObject}`);
   }
 }
-function stopWebGPUVfcLoop() { wgpuVfcRunning = false; }
+function stopWebGPUVfcLoop() { log('lifecycle', '[lifecycle] stopWebGPUVfcLoop'); wgpuVfcRunning = false; }
 
 // PHASE 1 INSTRUMENTATION: measure detector-call vs video-frame rates so we
 // can see how many duplicate frames the WGPU path is processing. Counts only,
@@ -1991,23 +2176,36 @@ function _p1MaybeReport(now) {
 }
 
 let _lastHandFrameTime = 0;
+let _handBusySince = 0;
+let _handBusyWarned = false;
+let _handCallN = 0;
 function processWebGPUHands() {
-  if (!gpuReady || gpuHandBusy) return;
+  if (!gpuReady) return;
+  if (gpuHandBusy) {
+    if (!_handBusyWarned && _handBusySince && performance.now() - _handBusySince > 2000) {
+      console.warn('[processWebGPUHands] gpuHandBusy stuck true for >2s');
+      _handBusyWarned = true;
+    }
+    return;
+  }
   // Gate: only process once per video frame (prevent oversampling)
   const now = performance.now();
   if (now - _lastHandFrameTime < 16) return; // skip if <16ms since last call
   _lastHandFrameTime = now;
   _p1HandCalls++;
+  _handCallN++;
+  const callN = _handCallN;
+  if (callN <= 3) log('lifecycle', `[lifecycle] processWebGPUHands #${callN} dispatched`);
   gpuHandBusy = true;
+  _handBusySince = performance.now();
+  _handBusyWarned = false;
   const t0 = now;
   gpuHandTracker.processFrame(video).then(result => {
+    if (callN <= 3) log('lifecycle', `[lifecycle] processWebGPUHands #${callN} resolved (${(performance.now() - t0).toFixed(1)}ms)`);
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
     _bench.handCounts.push(result.hands ? result.hands.filter(Boolean).length : 0);
     if (result.palmPreview) drawPalmPreview(result.palmPreview);
-    // WebGPU Vision pipeline returns a fixed 2-element `hands` array in
-    // stable slot order (centroid-based identity tracking). Pass `stable:true`
-    // so handleHandResult skips its MediaPipe-only handedness sort.
     if (result.hands && result.hands.some(Boolean)) {
       handleHandResult(result.hands, { stable: true });
     } else {
@@ -2027,23 +2225,42 @@ faceModeSelect.addEventListener('change', (e) => {
   faceMode = e.target.value;
   setSetting('faceMode', faceMode);
   log('bench', '[BENCH] Face mode switched to:', faceMode);
-  // MediaPipe worker holds both tasks; tell it which one to run from now on.
-  // WebGPU path reads faceMode directly each frame in processWebGPUFace().
-  if (activeBackend === 'mediapipe' && faceWorker) {
-    faceWorker.postMessage({ type: 'setMode', mode: faceMode });
+  updateFacePrecisionUI();
+  if (activeBackend === 'mediapipe') {
+    if (mediapipeMode === 'workers' && faceWorker) {
+      faceWorker.postMessage({ type: 'setMode', mode: faceMode });
+    }
   }
-  // WebGPU only: detector and landmark paths use different signals for X/Y/Z
-  // (bbox center + bbox.w vs eye-corner positions + eye-distance). Their
-  // baselines are NOT comparable, so reusing refEyeDist or headOffset across
-  // a mode switch would cause a visible jump in scene depth. Reset both so
-  // the next detection in the new mode re-establishes a fresh baseline.
   if (activeBackend === 'webgpu') {
     refEyeDist = 0;
     headCalibrated = false;
-    lastFaceCrop = null; smoothCropCx = smoothCropCy = null; // drop ROI so new mode starts full-frame
-    lastFacePos = null;      // and the spatial-jump gate
+    lastFaceCrop = null; smoothCropCx = smoothCropCy = null;
+    lastFacePos = null;
   }
   applyProfile();
+});
+
+const facePrecisionSelect = document.getElementById('face-precision');
+facePrecisionSelect.value = getSetting('facePrecision');
+function updateFacePrecisionUI() {
+  const isLandmark = faceMode === 'landmark';
+  facePrecisionSelect.disabled = !isLandmark;
+  facePrecisionSelect.style.opacity = isLandmark ? '1' : '0.4';
+  if (!isLandmark) { facePrecisionSelect.value = 'f32'; }
+}
+updateFacePrecisionUI();
+facePrecisionSelect.addEventListener('change', async (e) => {
+  const prec = e.target.value;
+  setSetting('facePrecision', prec);
+  if (activeBackend === 'webgpu' && gpuFaceTracker) {
+    try {
+      await gpuFaceTracker.switchPrecision(prec === 'f16');
+      log('bench', `[BENCH] Face precision switched to ${prec}`);
+    } catch (err) {
+      console.error('[face-precision] switch failed:', err);
+      facePrecisionSelect.value = getSetting('facePrecision');
+    }
+  }
 });
 
 // Face ROI tracking toggle. 'off' = run BlazeFace on the full frame every call
@@ -2060,11 +2277,26 @@ faceRoiSelect.addEventListener('change', (e) => {
   e.target.blur();
 });
 
+let _faceBusySince = 0;
+let _faceBusyWarned = false;
+let _faceCallN = 0;
 function processWebGPUFace() {
-  if (!gpuReady || gpuFaceBusy) return;
+  if (!gpuReady) return;
+  if (gpuFaceBusy) {
+    if (!_faceBusyWarned && _faceBusySince && performance.now() - _faceBusySince > 2000) {
+      console.warn('[processWebGPUFace] gpuFaceBusy stuck true for >2s');
+      _faceBusyWarned = true;
+    }
+    return;
+  }
   _p1FaceCalls++;
+  _faceCallN++;
+  const callN = _faceCallN;
+  if (callN <= 3) log('lifecycle', `[lifecycle] processWebGPUFace #${callN} dispatched`);
   gpuFaceBusy = true;
-  const t0 = performance.now();
+  _faceBusySince = performance.now();
+  _faceBusyWarned = false;
+  const t0 = _faceBusySince;
 
   if (faceMode === 'detector') {
     // Detector with ROI tracking: after the first successful detection, the
@@ -2153,19 +2385,20 @@ function processWebGPUFace() {
       );
     }
 
-    // DEBUG: mirror the exact input we're about to hand BlazeFace into the
-    // lower-right debug panel. Shows up as soon as the first crop is built.
     {
       const dbg = document.getElementById('crop-debug');
-      const dbgCanvas = document.getElementById('crop-debug-canvas');
-      if (dbg && dbgCanvas) {
-        dbg.style.display = useCrop ? 'block' : 'block';
-        const dctx = dbgCanvas.getContext('2d');
-        dctx.fillStyle = '#000';
-        dctx.fillRect(0, 0, 160, 160);
-        dctx.drawImage(faceCropCanvas, 0, 0, 160, 160);
-        // Red outline at the inferred face center (in crop-local space) so we
-        // can see whether BlazeFace is looking where we think it is.
+      const showCrop = document.getElementById('show-crop-input')?.checked;
+      if (dbg) {
+        if (useCrop && showCrop) {
+          dbg.style.display = 'block';
+          const dbgCanvas = document.getElementById('crop-debug-canvas');
+          const dctx = dbgCanvas.getContext('2d');
+          dctx.fillStyle = '#000';
+          dctx.fillRect(0, 0, 160, 160);
+          dctx.drawImage(faceCropCanvas, 0, 0, 160, 160);
+        } else {
+          dbg.style.display = 'none';
+        }
       }
     }
 
@@ -2235,6 +2468,7 @@ function processWebGPUFace() {
         }
 
         gpuFaceBusy = false;
+        if (callN <= 3) log('lifecycle', `[lifecycle] processWebGPUFace #${callN} resolved-detect (${(performance.now() - t0).toFixed(1)}ms)`);
       }).catch(err => { console.error('WebGPU face detect error:', err); gpuFaceBusy = false; });
     });
     return;
@@ -2242,6 +2476,7 @@ function processWebGPUFace() {
 
   // Landmark mode (full 478-point model)
   gpuFaceTracker.processFrame(video, { runBlendshapes: false }).then(result => {
+    if (callN <= 3) log('lifecycle', `[lifecycle] processWebGPUFace #${callN} resolved-landmark (${(performance.now() - t0).toFixed(1)}ms)`);
     const latency = performance.now() - t0;
     _bench.faceLatencies.push(latency);
     if (result.faces && result.faces.length > 0) {
@@ -2276,22 +2511,21 @@ function animate(timestamp) {
   if (!animate._n) animate._n = 0;
   animate._n++;
   if (animate._n === 1) log('lifecycle', '[lifecycle] animate() first call');
-  if (animate._n === 3) log('lifecycle', '[lifecycle] animate() rAF chain alive (frame 3)');
+  if (animate._n >= 2 && animate._n <= 6) log('lifecycle', `[lifecycle] animate() frame ${animate._n} ts=${timestamp} lastTs=${lastAnimateTimestamp}`);
   if (animate._n % 300 === 0) log('lifecycle', `[lifecycle] animate() frame ${animate._n} (ts=${timestamp.toFixed(0)})`);
   // Dedupe parallel animate chains: when the tab is hidden then re-shown,
   // the throttled-old rAF and the visibilitychange-spawned new rAF can both
   // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
   // the second one returns here and the chain merges back into one.
   if (timestamp === lastAnimateTimestamp) {
-    log('lifecycle', `[lifecycle] animate() DEDUPE BAIL frame ${animate._n} ts=${timestamp.toFixed(0)} -- rAF chain DIES here`);
+    log('lifecycle', `[lifecycle] animate() DEDUPE BAIL frame ${animate._n} ts=${timestamp.toFixed(0)} -- duplicate chain merged`);
     return;
   }
   lastAnimateTimestamp = timestamp;
+  requestAnimationFrame(animate);
   if (document.hidden) {
-    console.warn(`[lifecycle] animate() HIDDEN BAIL frame ${animate._n} -- rAF chain DIES here`);
     return;
   }
-  requestAnimationFrame(animate);
   // COI service worker reloads the page without user activation, so Chrome
   // can throttle rAF to 1fps. Detect this and pump via setTimeout until
   // rAF un-throttles. The dedup above prevents double-rendering.
@@ -2306,6 +2540,7 @@ function animate(timestamp) {
     log('lifecycle', '[lifecycle] rAF un-throttled -- boost off');
   }
   animate._prevTs = timestamp;
+  if (animate._n === 10) log('lifecycle', `[lifecycle] animate() RENDER ALIVE (frame 10, ts=${timestamp.toFixed(0)})`);
   try {
   const dt = clock.getDelta();
   const now = performance.now();
@@ -2368,7 +2603,7 @@ function animate(timestamp) {
       axes.xArrow.setDirection(across);
       axes.yArrow.setDirection(up);
       axes.zArrow.setDirection(normal);
-      axes.group.visible = true;
+      axes.group.visible = document.getElementById('show-axes').checked;
     } else {
       axes.group.visible = false;
     }
@@ -2559,20 +2794,66 @@ const statusEl = document.getElementById('status');
 
 function updateStatus() {
   if (activeBackend === 'mediapipe') {
-    const parts = [];
-    if (!faceReady) parts.push('Loading face model...');
-    if (!handReady) parts.push('Loading hand model...');
-    if (parts.length === 0) {
-      // Don't reveal UI during preload — wait until camera is actually live.
-      // revealSceneUI() handles showing HUD/controls after the user clicks Start.
-      if (video.srcObject) {
-        document.getElementById('backend-label').textContent = 'MediaPipe';
+    const modeLabel = mediapipeMode === 'standard' ? 'MediaPipe (Std)' : 'MediaPipe (Wkr)';
+    if (mediapipeMode === 'standard') {
+      if (!mpStdReady) {
+        if (video.srcObject) statusEl.textContent = 'Loading MediaPipe models...';
+      } else if (video.srcObject) {
+        document.getElementById('backend-label').textContent = modeLabel;
       }
-    } else if (video.srcObject) {
-      statusEl.textContent = parts.join(' ');
+    } else {
+      const parts = [];
+      if (!faceReady) parts.push('Loading face model...');
+      if (!handReady) parts.push('Loading hand model...');
+      if (parts.length === 0) {
+        if (video.srcObject) {
+          document.getElementById('backend-label').textContent = modeLabel;
+        }
+      } else if (video.srcObject) {
+        statusEl.textContent = parts.join(' ');
+      }
     }
   }
 }
+
+// Start whichever MediaPipe mode is active (workers or standard)
+function startMediaPipeActive() {
+  const numHands = parseInt(getSetting('numHands'));
+  const modeLabel = mediapipeMode === 'standard' ? 'MediaPipe (Std)' : 'MediaPipe (Wkr)';
+  if (mediapipeMode === 'standard') {
+    initMediaPipeStandard(numHands).then(() => {
+      mpStdVfcRunning = true;
+      video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+      document.getElementById('backend-label').textContent = modeLabel;
+    });
+  } else {
+    initMediaPipeBackend(numHands);
+    video.requestVideoFrameCallback(sendMediaPipeFrames);
+    document.getElementById('backend-label').textContent = modeLabel;
+  }
+}
+
+// --- MediaPipe mode dropdown: swap between workers and main-thread ---
+document.getElementById('mediapipe-mode').addEventListener('change', async (e) => {
+  mediapipeMode = e.target.value;
+  setSetting('mediapipeMode', mediapipeMode);
+  e.target.blur();
+  if (activeBackend !== 'mediapipe' || !video.srcObject) return;
+
+  teardownMediaPipe();
+  teardownMediaPipeStandard();
+  currentHands = [null, null];
+  headPos.x = headPos.y = headPos.z = 0;
+  refEyeDist = 0;
+  faceKeypoints = null;
+  headLastSeen = 0;
+  handLastSeen = 0;
+  lastHandCount = 0;
+  for (const f of headFilters) f.reset();
+  for (const hand of handFilters) for (const joint of hand) for (const f of joint) f.reset();
+
+  startMediaPipeActive();
+});
 
 // --- Backend dropdown: hot-swap without reload ---
 let switching = false;
@@ -2587,7 +2868,7 @@ backendSelect.addEventListener('change', async (e) => {
   // Prevent double-switching
   if (switching) return;
   switching = true;
-  statusEl.textContent = `Switching to ${newBackend === 'webgpu' ? 'WebGPU' : 'MediaPipe'}...`;
+  statusEl.textContent = `Switching to ${newBackend === 'webgpu' ? 'WebGPU' : 'MediaPipe (' + (mediapipeMode === 'standard' ? 'Std' : 'Wkr') + ')'}...`;
 
   // Clear tracking state
   currentHands = [null, null];
@@ -2604,6 +2885,7 @@ backendSelect.addEventListener('change', async (e) => {
   // resources just by being loaded, so keeping both alive causes contention.
   if (activeBackend === 'mediapipe') {
     teardownMediaPipe();
+    teardownMediaPipeStandard();
   } else {
     stopWebGPUVfcLoop();
   }
@@ -2612,14 +2894,12 @@ backendSelect.addEventListener('change', async (e) => {
   activeBackend = newBackend;
   applyProfile();
   syncInterpAdaptiveAvailability();
+  syncMediaPipeModeVisibility();
   if (newBackend === 'webgpu') {
-    // Both backends stay preloaded. Just restart the VFC loop — gpuReady and
-    // the trackers persist across switches.
     if (gpuReady) {
       startWebGPUVfcLoop();
       document.getElementById('backend-label').textContent = 'WebGPU';
     } else {
-      // First switch to WebGPU, preload may still be running
       const ok = await initWebGPUBackend();
       if (ok) {
         document.getElementById('backend-label').textContent = 'WebGPU';
@@ -2628,33 +2908,48 @@ backendSelect.addEventListener('change', async (e) => {
       }
     }
   } else {
-    initMediaPipeBackend(parseInt(getSetting('numHands')));
-    video.requestVideoFrameCallback(sendMediaPipeFrames);
-    document.getElementById('backend-label').textContent = 'MediaPipe';
+    startMediaPipeActive();
   }
 
   switching = false;
 });
 
 // --- Hands dropdown: save + reinit if MediaPipe ---
-numHandsSelect.addEventListener('change', (e) => {
+numHandsSelect.addEventListener('change', async (e) => {
   const numHands = parseInt(e.target.value);
   setSetting('numHands', e.target.value);
 
-  if (activeBackend === 'mediapipe' && handWorker) {
-    handWorker.terminate();
-    handReady = false;
-    handIdle = true;
-    currentHands = [null, null];
-    handLastSeen = 0;
-    lastHandCount = 0;
-    statusEl.textContent = 'Reloading hand model...';
-    handWorker = new Worker('hand-worker.js');
-    handWorker.onmessage = (ev) => {
-      if (ev.data.type === 'init') { handReady = true; updateStatus(); }
-      if (ev.data.type === 'result') { handleHandResult(ev.data.hands); handIdle = true; }
-    };
-    handWorker.postMessage({ type: 'init', numHands });
+  if (activeBackend === 'mediapipe') {
+    if (mediapipeMode === 'standard') {
+      if (mpStdHandLandmarker) { mpStdHandLandmarker.close(); mpStdHandLandmarker = null; }
+      currentHands = [null, null];
+      handLastSeen = 0;
+      lastHandCount = 0;
+      statusEl.textContent = 'Reloading hand model...';
+      const mp = await loadMediaPipeVision();
+      const vision = await mp.FilesetResolver.forVisionTasks(WASM_URL);
+      mpStdHandLandmarker = await mp.HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MP_HAND_MODEL, delegate: 'GPU' },
+        runningMode: 'VIDEO', numHands: numHands,
+        canvas: document.createElement('canvas'),
+        minHandDetectionConfidence: 0.3, minTrackingConfidence: 0.3,
+      });
+      updateStatus();
+    } else if (handWorker) {
+      handWorker.terminate();
+      handReady = false;
+      handIdle = true;
+      currentHands = [null, null];
+      handLastSeen = 0;
+      lastHandCount = 0;
+      statusEl.textContent = 'Reloading hand model...';
+      handWorker = new Worker('hand-worker.js');
+      handWorker.onmessage = (ev) => {
+        if (ev.data.type === 'init') { handReady = true; updateStatus(); }
+        if (ev.data.type === 'result') { handleHandResult(ev.data.hands); handIdle = true; }
+      };
+      handWorker.postMessage({ type: 'init', numHands });
+    }
   }
   // WebGPU always tracks 2 hands, dropdown is informational
   e.target.blur();
@@ -2725,7 +3020,9 @@ function revealSceneUI() {
     const filterEl = document.getElementById('filter-controls');
     const interpEl = document.getElementById('interp-controls');
     const trackEl = document.getElementById('tracking-controls');
+    const mpModeEl = document.getElementById('mediapipe-mode-controls');
     if (!drawer.dataset.populated) {
+      drawer.appendChild(mpModeEl);
       drawer.appendChild(filterEl);
       drawer.appendChild(interpEl);
       drawer.appendChild(trackEl);
@@ -2735,6 +3032,7 @@ function revealSceneUI() {
     filterEl.style.display = 'block';
     interpEl.style.display = 'block';
     trackEl.style.display = 'block';
+    syncMediaPipeModeVisibility();
     const hamburger = document.getElementById('hamburger-btn');
     hamburger.style.display = 'flex';
     // Match the hamburger's height to #controls so they bottom-align.
@@ -2834,19 +3132,18 @@ async function loadCameraAndModels() {
       }
     }).catch(err => console.error('WebGPU init error:', err));
   } else {
-    initMediaPipeBackend(parseInt(getSetting('numHands')));
-    video.requestVideoFrameCallback(sendMediaPipeFrames);
+    startMediaPipeActive();
   }
 }
 
 {
   const pinchSlider = document.getElementById('pinch-thresh');
   const pinchVal = document.getElementById('pinch-thresh-val');
-  pinchSlider.value = pinchThreshold;
-  pinchVal.textContent = pinchThreshold.toFixed(3);
+  pinchSlider.value = pinchThreshold * 100;
+  pinchVal.textContent = (pinchThreshold * 100).toFixed(1);
   pinchSlider.addEventListener('input', (e) => {
-    pinchThreshold = parseFloat(e.target.value);
-    pinchVal.textContent = pinchThreshold.toFixed(3);
+    pinchThreshold = parseFloat(e.target.value) / 100;
+    pinchVal.textContent = parseFloat(e.target.value).toFixed(1);
     setSetting('pinchThresh', String(pinchThreshold));
   });
 }
@@ -2920,19 +3217,60 @@ function syncInterpAdaptiveAvailability() {
 
 document.getElementById('start-btn').addEventListener('click', startCamera);
 
-// Only preload the SELECTED backend. WGSL workers each create their own GPU device,
-// so running both backends simultaneously causes GPU contention and flickering.
-// The other backend inits on-demand if the user switches via dropdown.
+// ── Staged preload queue ────────────────────────────────────────────
+// Priority: 1) user's selected model → tracking live ASAP
+//           2) remaining model .bin/.json → instant dropdown switching
+//
+// MediaPipe loads on-demand when user switches backend (its WASM grabs a
+// WebGL context on load, which conflicts with active WebGPU devices).
+//
+// Order adapts to user settings. Each stage is fire-and-forget; failures
+// in later stages never block earlier ones.
 {
   const preferred = getSetting('backend');
-  if (preferred === 'mediapipe') {
-    initMediaPipeBackend(parseInt(getSetting('numHands')));
-  } else {
-    initWebGPUBackend(true).catch(err => {
-      console.warn('WebGPU preload failed, falling back to MediaPipe:', err);
-      initMediaPipeBackend(parseInt(getSetting('numHands')));
-    });
+  const selectedModel = getSetting('handModel') || 'standard-f16';
+
+  // All model variants and their file paths (relative to page)
+  const MODEL_FILES = {
+    'standard-f32': '../../models/hand/hand_landmark_standard/hand_landmark_standard',
+    'standard-f16': '../../models/hand/hand_landmark_standard/hand_landmark_standard_f16',
+    'large-f32':    '../../models/hand/hand_landmark_large/hand_landmark_large',
+    'large-f16':    '../../models/hand/hand_landmark_large/hand_landmark_large_f16',
+  };
+
+  function prefetchModel(key) {
+    const base = MODEL_FILES[key];
+    if (!base) return Promise.resolve();
+    return Promise.all([
+      fetch(base + '.json').catch(() => {}),
+      fetch(base + '.bin').catch(() => {}),
+    ]);
   }
+
+  async function runPreloadQueue() {
+    // Stage 1: boot the user's selected backend
+    if (preferred === 'mediapipe') {
+      await loadMediaPipeVision().catch(() => {});
+      if (mediapipeMode !== 'standard') {
+        initMediaPipeBackend(parseInt(getSetting('numHands')));
+      }
+    } else {
+      const ok = await initWebGPUBackend(true).catch(err => {
+        console.warn('WebGPU preload failed:', err);
+        return false;
+      });
+      if (!ok) return;
+    }
+
+    // Stage 2: prefetch remaining model variants into browser cache
+    const others = Object.keys(MODEL_FILES).filter(k => k !== selectedModel);
+    for (const key of others) {
+      await prefetchModel(key);
+    }
+    log('lifecycle', '[preload] all model variants cached');
+  }
+
+  runPreloadQueue();
 }
 function toggleSettingsDrawer() {
   const drawer = document.getElementById('settings-drawer');
@@ -2948,6 +3286,24 @@ window.addEventListener('keydown', (e) => {
 });
 
 document.getElementById('hamburger-btn').addEventListener('click', toggleSettingsDrawer);
+
+{
+  const tipEl = document.getElementById('tip-float');
+  document.addEventListener('pointerenter', (e) => {
+    if (!e.target.closest) return;
+    const t = e.target.closest('[data-tip]');
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    tipEl.textContent = t.dataset.tip;
+    tipEl.style.left = r.left + 'px';
+    tipEl.style.top = r.top - 24 + 'px';
+    tipEl.style.display = 'block';
+  }, true);
+  document.addEventListener('pointerleave', (e) => {
+    if (!e.target.closest) return;
+    if (e.target.closest('[data-tip]')) tipEl.style.display = 'none';
+  }, true);
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -2965,7 +3321,11 @@ document.addEventListener('visibilitychange', () => {
     log('lifecycle', `[lifecycle] visibilitychange RESTARTING animate + rVFC`);
     requestAnimationFrame(animate);
     if (activeBackend === 'mediapipe') {
-      video.requestVideoFrameCallback(sendMediaPipeFrames);
+      if (mediapipeMode === 'standard' && mpStdVfcRunning) {
+        video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
+      } else {
+        video.requestVideoFrameCallback(sendMediaPipeFrames);
+      }
     }
     if (activeBackend === 'webgpu' && wgpuVfcRunning) {
       video.requestVideoFrameCallback(wgpuVfcTick);
