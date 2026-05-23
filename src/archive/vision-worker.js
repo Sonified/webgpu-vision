@@ -201,7 +201,7 @@ async function init() {
   // Load and compile all 4 models
   const [palm, hand, faceDet, faceLm] = await Promise.all([
     loadModel('../models/hand/palm_detection_lite/palm_detection_lite.json', '../models/hand/palm_detection_lite/palm_detection_lite.bin'),
-    loadModel('../models/hand/hand_landmark_4mb/hand_landmark_full.json', '../models/hand/hand_landmark_4mb/hand_landmark_full.bin'),
+    loadModel('../models/hand/hand_landmark_standard/hand_landmark_standard.json', '../models/hand/hand_landmark_standard/hand_landmark_standard.bin'),
     loadModel('../models/face/face_detector/face_detector.json', '../models/face/face_detector/face_detector.bin'),
     loadModel('../models/face/face_landmarks/face_landmarks_detector.json', '../models/face/face_landmarks/face_landmarks_detector.bin'),
   ]);

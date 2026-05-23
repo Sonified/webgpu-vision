@@ -9,17 +9,29 @@ applyLogGatesFromUrl();
 const S = 256; // face landmark model input size
 const NUM_LANDMARKS = 478;
 const LANDMARK_FLOATS = NUM_LANDMARKS * 3; // 1434
-const MODEL_JSON_URL = '../models/face/face_landmarks/face_landmarks_detector.json';
-const MODEL_BIN_URL = '../models/face/face_landmarks/face_landmarks_detector.bin';
+
+const MODEL_BASE = '../models/face/face_landmarks/face_landmarks_detector';
 
 let runner = null;
 let device = null;
 let inputBuf = null;
+let hasF16 = false;
+let useF16 = false;
 
 let warpPipeline = null;
 let uniformBuffer = null;
 let gpuSampler = null;
 let outputNames = {};
+
+// f32->f16 cast state
+let castPipeline = null;
+let castBindGroup = null;
+let castParamsBuf = null;
+let inputBufF16 = null;
+
+// Pipeline caches
+let pipelinesF32 = null;
+let pipelinesF16 = null;
 
 const WGSL_WARP = `
 struct Uniforms {
@@ -88,9 +100,11 @@ function computeAffineParams(rect) {
   };
 }
 
-async function initGPU() {
+async function initGPU(wantF16) {
   const adapter = await navigator.gpu.requestAdapter();
-  device = await adapter.requestDevice();
+  hasF16 = adapter.features.has('shader-f16');
+  const features = hasF16 ? ['shader-f16'] : [];
+  device = await adapter.requestDevice({ requiredFeatures: features });
 
   warpPipeline = device.createComputePipeline({
     layout: 'auto',
@@ -102,25 +116,11 @@ async function initGPU() {
   uniformBuffer = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   gpuSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
-  const graph = await (await fetch(MODEL_JSON_URL)).json();
-  const allWeights = new Float32Array(await (await fetch(MODEL_BIN_URL)).arrayBuffer());
-
-  const W = {};
-  for (const [name, info] of Object.entries(graph.weights)) {
-    if (info.length === 0) continue;
-    const buf = device.createBuffer({ size: Math.max(info.length * 4, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, allWeights.subarray(info.offset, info.offset + info.length));
-    W[name] = buf;
-  }
-
-  const allWeightsBuf = device.createBuffer({ size: allWeights.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(allWeightsBuf, 0, allWeights);
-
   const mkP = async (name) => {
     const code = await (await fetch(`../engine/${name}.wgsl`)).text();
     return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
   };
-  const P = {
+  pipelinesF32 = {
     conv2d: await mkP('conv2d'), maxpool: await mkP('maxpool'), resize: await mkP('resize'),
     gemm: await mkP('gemm'), global_avg_pool: await mkP('global_avg_pool'),
     add: await mkP('add'), pad_channels: await mkP('pad_channels'),
@@ -128,10 +128,88 @@ async function initGPU() {
     transpose_nhwc: await mkP('transpose_nhwc'),
   };
 
-  runner = new ModelRunner(device, P, W, allWeightsBuf);
-  const outputs = await runner.compile(graph, inputBuf, allWeights);
+  if (hasF16) {
+    const mkF16 = async (name) => {
+      const code = await (await fetch(`../engine/${name}_f16.wgsl`)).text();
+      return device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+    };
+    pipelinesF16 = {
+      conv2d: await mkF16('conv2d'), maxpool: await mkF16('maxpool'),
+      gemm: await mkF16('gemm'), global_avg_pool: await mkF16('global_avg_pool'),
+      add: await mkF16('add'), fused_block: await mkF16('fused_block'),
+      fused_block_tiled: null,
+      resize: pipelinesF32.resize,
+      transpose_nhwc: await mkF16('transpose_nhwc'),
+      pad_channels: await mkF16('pad_channels'),
+    };
+    const castCode = await (await fetch('../engine/cast_f32_to_f16.wgsl')).text();
+    castPipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: device.createShaderModule({ code: castCode }), entryPoint: 'main' },
+    });
+    castParamsBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(castParamsBuf, 0, new Uint32Array([S * S * 3]));
+  }
 
-  // Discover output names by size
+  await loadModel(wantF16 && hasF16);
+}
+
+async function loadModel(f16) {
+  useF16 = f16;
+  const suffix = f16 ? '_f16' : '';
+  const bpe = f16 ? 2 : 4;
+  const TA = f16 ? Float16Array : Float32Array;
+  const P = f16 ? pipelinesF16 : pipelinesF32;
+
+  const graph = await (await fetch(`${MODEL_BASE}${suffix}.json`)).json();
+  const allWeights = new TA(await (await fetch(`${MODEL_BASE}${suffix}.bin`)).arrayBuffer());
+
+  const align4 = (arr) => {
+    if (arr.byteLength % 4 === 0) return arr;
+    const padded = new TA(arr.length + 1);
+    padded.set(arr);
+    return padded;
+  };
+
+  const W = {};
+  for (const [name, info] of Object.entries(graph.weights)) {
+    if (info.length === 0) continue;
+    const data = align4(allWeights.subarray(info.offset, info.offset + info.length));
+    const buf = device.createBuffer({ size: Math.max(data.byteLength, 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buf, 0, data);
+    W[name] = buf;
+  }
+
+  const allWPadded = align4(allWeights);
+  const allWeightsBuf = device.createBuffer({ size: allWPadded.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(allWeightsBuf, 0, allWPadded);
+
+  let modelInputBuf = inputBuf;
+  if (f16) {
+    if (!inputBufF16) {
+      inputBufF16 = device.createBuffer({
+        size: S * S * 3 * 2 + (S * S * 3 * 2 % 4),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+    }
+    modelInputBuf = inputBufF16;
+    castBindGroup = device.createBindGroup({
+      layout: castPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: castParamsBuf } },
+        { binding: 1, resource: { buffer: inputBuf } },
+        { binding: 2, resource: { buffer: inputBufF16 } },
+      ],
+    });
+  } else {
+    castBindGroup = null;
+  }
+
+  const newRunner = new ModelRunner(device, P, W, allWeightsBuf, f16 ? { f16: true } : {});
+  const outputs = await newRunner.compile(graph, modelInputBuf, allWeights);
+  runner = newRunner;
+
+  outputNames = {};
   for (const [name, data] of Object.entries(outputs)) {
     if (data.length === LANDMARK_FLOATS) outputNames.landmarks = name;
     else if (data.length === 1 && !outputNames.faceFlag) outputNames.faceFlag = name;
@@ -185,11 +263,25 @@ self.onmessage = async (e) => {
 
   if (type === 'init') {
     try {
-      await initGPU();
-      log('lifecycle', '[face-lm-worker-wgsl] ready (compiled WGSL engine)');
-      self.postMessage({ type: 'ready', gpuDirect: true });
+      await initGPU(e.data.f16);
+      const tag = useF16 ? 'f16' : 'f32';
+      log('lifecycle', `[face-lm-worker-wgsl] ready (WGSL ${tag})`);
+      self.postMessage({ type: 'ready', gpuDirect: true, f16: useF16 });
     } catch (err) {
       console.error('[face-lm-worker-wgsl] init error:', err);
+      self.postMessage({ type: 'error', message: err.message });
+    }
+  }
+
+  if (type === 'switchPrecision') {
+    try {
+      const wantF16 = e.data.f16 && hasF16;
+      if (wantF16 === useF16) { self.postMessage({ type: 'switchDone', f16: useF16 }); return; }
+      await loadModel(wantF16);
+      log('lifecycle', `[face-lm-worker-wgsl] switched to ${useF16 ? 'f16' : 'f32'}`);
+      self.postMessage({ type: 'switchDone', f16: useF16 });
+    } catch (err) {
+      console.error('[face-lm-worker-wgsl] switchPrecision error:', err);
       self.postMessage({ type: 'error', message: err.message });
     }
   }
@@ -208,9 +300,15 @@ self.onmessage = async (e) => {
       dispatchWarp(frame, inv);
       frame.close();
 
-      // Single encoder: warp + inference + readback in one submit
       const enc = device.createCommandEncoder();
       encodeWarp(enc);
+      if (useF16 && castBindGroup) {
+        const castPass = enc.beginComputePass();
+        castPass.setPipeline(castPipeline);
+        castPass.setBindGroup(0, castBindGroup);
+        castPass.dispatchWorkgroups(Math.ceil(S * S * 3 / 256));
+        castPass.end();
+      }
       runner.encodeInto(enc);
       device.queue.submit([enc.finish()]);
       const outputs = await runner.readOutputs();

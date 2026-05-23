@@ -9,13 +9,13 @@ applyLogGatesFromUrl();
 const S = 224; // landmark model input size
 
 const MODEL_VARIANTS = {
-  '4mb-f32':  { json: '../models/hand/hand_landmark_4mb/hand_landmark_full',           f16: false },
-  '4mb-f16':  { json: '../models/hand/hand_landmark_f16_2mb/hand_landmark_full_f16',   f16: true  },
-  '10mb-f32': { json: '../models/hand/hand_landmark_10mb/hand_landmark_sparse',        f16: false },
-  '10mb-f16': { json: '../models/hand/hand_landmark_f16_5mb/hand_landmark_sparse_f16', f16: true  },
+  'standard-f32': { json: '../models/hand/hand_landmark_standard/hand_landmark_standard',        f16: false },
+  'standard-f16': { json: '../models/hand/hand_landmark_standard/hand_landmark_standard_f16',    f16: true  },
+  'large-f32':    { json: '../models/hand/hand_landmark_large/hand_landmark_large',              f16: false },
+  'large-f16':    { json: '../models/hand/hand_landmark_large/hand_landmark_large_f16',          f16: true  },
 };
 
-let currentVariant = '4mb-f32';
+let currentVariant = 'standard-f16';
 let runner = null;
 let device = null;
 let inputBuf = null; // also the warp output buffer
@@ -111,7 +111,7 @@ let pipelinesF32 = null;
 let pipelinesF16 = null;
 
 async function initGPU(variant) {
-  currentVariant = variant || '4mb-f32';
+  currentVariant = variant || 'standard-f16';
   const adapter = await navigator.gpu.requestAdapter();
   hasF16 = adapter.features.has('shader-f16');
   const features = hasF16 ? ['shader-f16'] : [];
@@ -150,8 +150,9 @@ async function initGPU(variant) {
       conv2d: await mkF16('conv2d'), maxpool: await mkF16('maxpool'),
       gemm: await mkF16('gemm'), global_avg_pool: await mkF16('global_avg_pool'),
       add: await mkF16('add'), fused_block: await mkF16('fused_block'),
-      resize: pipelinesF32.resize, transpose_nhwc: pipelinesF32.transpose_nhwc,
-      pad_channels: pipelinesF32.pad_channels,
+      resize: pipelinesF32.resize,
+      transpose_nhwc: await mkF16('transpose_nhwc'),
+      pad_channels: await mkF16('pad_channels'),
     };
     const castCode = await (await fetch('../engine/cast_f32_to_f16.wgsl')).text();
     castPipeline = device.createComputePipeline({
@@ -286,8 +287,8 @@ self.onmessage = async (e) => {
 
   if (type === 'init') {
     try {
-      await initGPU();
-      log('lifecycle', '[landmark-worker-wgsl] ready (compiled WGSL engine)');
+      await initGPU(e.data.variant);
+      log('lifecycle', `[landmark-worker-wgsl] ready (compiled WGSL engine, variant=${currentVariant})`);
       self.postMessage({ type: 'ready', gpuDirect: true });
     } catch (err) {
       console.error('[landmark-worker-wgsl] init error:', err);

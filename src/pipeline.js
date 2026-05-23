@@ -22,6 +22,7 @@ const logLandmark = makeLogger('tracking', 2000);
 class PalmWorker {
   constructor(workerUrl, label) {
     this.label = label || 'ort';
+    this.ready = false;
     this.worker = new Worker(
       workerUrlWithGates(workerUrl || new URL('./palm-worker.js', import.meta.url)),
       { type: 'module' }
@@ -33,9 +34,11 @@ class PalmWorker {
   }
 
   init(modelUrl) {
+    this.ready = false;
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
+          this.ready = true;
           this.worker.onmessage = (ev) => this._onMessage(ev);
           resolve();
         } else if (e.data.type === 'error') {
@@ -52,10 +55,18 @@ class PalmWorker {
   }
 
   detect(frame) {
+    if (!this.ready) {
+      frame.close();
+      return Promise.resolve({ detections: [], letterbox: {} });
+    }
     return new Promise((resolve) => {
       this.pendingResolve = resolve;
       this.worker.postMessage({ type: 'detect', bitmap: frame, frame }, [frame]);
     });
+  }
+
+  terminate() {
+    this.worker.terminate();
   }
 
   _onMessage(e) {
@@ -87,7 +98,7 @@ class LandmarkWorker {
     this.worker.onmessage = (e) => this._onMessage(e);
   }
 
-  init(modelUrl) {
+  init(modelUrl, variant) {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
@@ -97,7 +108,7 @@ class LandmarkWorker {
           reject(new Error(e.data.message));
         }
       };
-      this.worker.postMessage({ type: 'init', modelUrl });
+      this.worker.postMessage({ type: 'init', modelUrl, variant });
     });
   }
 
@@ -221,16 +232,16 @@ export class HandTracker {
     this.handFlagThreshold = HAND_FLAG_THRESHOLD;
   }
 
-  async init(onStatus) {
+  async init(onStatus, { variant = 'standard-f16' } = {}) {
     onStatus?.('Loading palm detection worker...');
     await this.palmWorker.init(PALM_MODEL_URL);
 
-    onStatus?.('Loading landmark worker 0...');
-    await this.landmarkWorkers[0].init(LANDMARK_MODEL_URL);
-    onStatus?.('Loading landmark worker 1...');
-    await this.landmarkWorkers[1].init(LANDMARK_MODEL_URL);
+    onStatus?.(`Loading landmark worker 0 (${variant})...`);
+    await this.landmarkWorkers[0].init(LANDMARK_MODEL_URL, variant);
+    onStatus?.(`Loading landmark worker 1 (${variant})...`);
+    await this.landmarkWorkers[1].init(LANDMARK_MODEL_URL, variant);
 
-    log('lifecycle', '[lifecycle] All workers ready -- main thread is pure orchestration');
+    log('lifecycle', `[lifecycle] All workers ready (${variant}) -- main thread is pure orchestration`);
     this.ready = true;
     onStatus?.('Ready');
   }
@@ -374,13 +385,18 @@ export class HandTracker {
         this.palmDetecting = true;
         const frame = new VideoFrame(video);
 
+        if (!this._palmDetN) this._palmDetN = 0;
+        this._palmDetN++;
+        const pdn = this._palmDetN;
+        const pdt0 = performance.now();
         this.palmWorker.detect(frame).then((result) => {
           this.palmDetecting = false;
+          if (pdn <= 5) log('lifecycle', `[lifecycle] palm detect #${pdn} resolved: ${result.detections.length} dets (${(performance.now() - pdt0).toFixed(1)}ms)`);
           if (result.previewRGBA) this._lastPreview = result.previewRGBA;
           if (result.detections.length > 0) {
             this.pendingDetections = result;
           }
-        }).catch(() => { this.palmDetecting = false; });
+        }).catch((err) => { this.palmDetecting = false; if (pdn <= 5) log('lifecycle', `[lifecycle] palm detect #${pdn} FAILED: ${err}`); });
       }
 
       // --- 3. Run landmark inference on every active slot ---
@@ -576,5 +592,18 @@ export class HandTracker {
   async switchModel(variant) {
     await Promise.all(this.landmarkWorkers.map(w => w.switchModel(variant)));
     log('lifecycle', `[HandTracker] switched to model: ${variant}`);
+  }
+
+  async switchPalmEngine(engine) {
+    this.palmDetecting = false;
+    this.palmWorker.terminate();
+
+    const url = engine === 'wgsl'
+      ? new URL('./palm-worker-wgsl.js', import.meta.url)
+      : new URL('./palm-worker.js', import.meta.url);
+    this.palmWorker = new PalmWorker(url, engine);
+    await this.palmWorker.init(PALM_MODEL_URL);
+    this.palmDetecting = false;
+    log('lifecycle', `[HandTracker] palm engine switched to: ${engine}`);
   }
 }

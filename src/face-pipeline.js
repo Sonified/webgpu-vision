@@ -75,7 +75,7 @@ class FaceLandmarkWorker {
     this.worker.onmessage = (e) => this._onMessage(e);
   }
 
-  init(modelUrl, blendshapeUrl) {
+  init(modelUrl, blendshapeUrl, f16 = false) {
     return new Promise((resolve, reject) => {
       this.worker.onmessage = (e) => {
         if (e.data.type === 'ready') {
@@ -85,7 +85,22 @@ class FaceLandmarkWorker {
           reject(new Error(e.data.message));
         }
       };
-      this.worker.postMessage({ type: 'init', modelUrl, blendshapeUrl });
+      this.worker.postMessage({ type: 'init', modelUrl, blendshapeUrl, f16 });
+    });
+  }
+
+  switchPrecision(f16) {
+    return new Promise((resolve, reject) => {
+      this.worker.onmessage = (e) => {
+        if (e.data.type === 'switchDone') {
+          this.worker.onmessage = (ev) => this._onMessage(ev);
+          resolve(e.data.f16);
+        } else if (e.data.type === 'error') {
+          this.worker.onmessage = (ev) => this._onMessage(ev);
+          reject(new Error(e.data.message));
+        }
+      };
+      this.worker.postMessage({ type: 'switchPrecision', f16 });
     });
   }
 
@@ -196,14 +211,14 @@ export class FaceTracker {
     this.pendingDetections = null;
   }
 
-  async init(onStatus) {
+  async init(onStatus, { f16 = false } = {}) {
     // Init workers sequentially (WebGPU EP requires it)
     onStatus?.('Loading face detection worker...');
     await this.detectWorker.init(FACE_DETECTOR_URL);
 
     for (let i = 0; i < this.landmarkWorkers.length; i++) {
       onStatus?.(`Loading face landmark worker ${i}...`);
-      await this.landmarkWorkers[i].init(FACE_LANDMARK_URL);
+      await this.landmarkWorkers[i].init(FACE_LANDMARK_URL, null, f16);
     }
 
     onStatus?.('Loading blendshape worker...');
@@ -212,6 +227,13 @@ export class FaceTracker {
     log('lifecycle', `[lifecycle] All face workers ready (${this.numFaces} face slots) -- main thread is pure orchestration`);
     this.ready = true;
     onStatus?.('Ready');
+  }
+
+  async switchPrecision(f16) {
+    const results = await Promise.all(this.landmarkWorkers.map(w => w.switchPrecision(f16)));
+    const actual = results[0];
+    log('lifecycle', `[FaceTracker] switched to ${actual ? 'f16' : 'f32'}`);
+    return actual;
   }
 
   async processFrame(video, { runBlendshapes = true } = {}) {
@@ -264,14 +286,19 @@ export class FaceTracker {
       const hasEmptySlots = this.slots.some(s => !s.active);
       if (hasEmptySlots && !this.detecting) {
         this.detecting = true;
+        if (!this._faceDetN) this._faceDetN = 0;
+        this._faceDetN++;
+        const fdn = this._faceDetN;
+        const fdt0 = performance.now();
         const frame = new VideoFrame(video);
         this.detectWorker.detect(frame).then(result => {
           this.detecting = false;
+          if (fdn <= 5) log('lifecycle', `[lifecycle] face detect #${fdn} resolved: ${result.detections.length} dets (${(performance.now() - fdt0).toFixed(1)}ms)`);
           if (result.detections.length > 0) {
             logDetect(`[face detect] ${result.detections.length} detections`);
             this.pendingDetections = result;
           }
-        }).catch(() => { this.detecting = false; });
+        }).catch((err) => { this.detecting = false; if (fdn <= 5) log('lifecycle', `[lifecycle] face detect #${fdn} FAILED: ${err}`); });
       }
 
       // Landmark inference for active slot
