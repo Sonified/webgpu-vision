@@ -4,6 +4,58 @@ Tracking instances where the ball-toss demo fails to fully start.
 
 ---
 
+## RESOLVED (2026-06-12): Root cause found -- rAF timestamp dedupe killed the render loop
+
+The cold-start freeze below is **solved**. Two production logs (one failed
+load, one good load immediately after refresh) finally captured the death:
+
+```
+[lifecycle] animate() frame 2 ts=13190.318 lastTs=undefined
+[lifecycle] animate() frame 3 ts=13190.318 lastTs=13190.318
+[lifecycle] animate() DEDUPE BAIL frame 3 ts=13190 -- duplicate chain merged
+(no frame 4, ever. heartbeat silent. tracking keeps running underneath.)
+```
+
+### Root cause
+
+Chrome **render-suppresses** pages reloaded by the COI service worker
+(`coi-serviceworker.js` reloads without user activation). In that state the
+rAF timestamp clock **freezes**: consecutive frames of the one-and-only
+animate chain receive identical timestamps. The dedupe-by-timestamp logic
+(designed to merge duplicate chains after tab-away/tab-back) mistook the
+frozen clock for a duplicate chain and returned without rescheduling --
+killing the only rAF registration. The scene froze; tracking (driven by
+`requestVideoFrameCallback`, which Chrome does NOT suppress) kept running,
+which is why the logs always looked healthy.
+
+Why the workarounds worked:
+- **Manual refresh**: carries user activation -> no suppression -> timestamps advance -> no dedupe.
+- **Tab-away-and-back**: the `visibilitychange` handler called `requestAnimationFrame(animate)`, starting a fresh chain.
+
+The old "boost" anti-throttle code couldn't save it because it lived
+*inside* `animate()` -- a watchdog inside the thing being watched.
+
+### Fix (demos/ball-toss/index.html, render loop lifecycle)
+
+1. **Single-registration invariant**: `scheduleAnimate()` tracks the rAF
+   handle in `renderLoop.rafId`; at most one registration ever exists.
+   Duplicate chains are structurally impossible, so the timestamp dedupe is
+   gone (frozen timestamps now just log and keep rendering).
+2. **External watchdog**: a `setInterval` *outside* the rAF chain detects
+   `animate()` stalled >1s while visible, re-arms rAF, and pumps frames via
+   `setTimeout` until real rAF frames resume.
+3. `kickAnimate()` passes `performance.now()` so no more `undefined`
+   timestamps from the bare `animate()` start call.
+
+### Regression tests
+
+- `diagnostic/ball-toss-smoke.mjs` -- headless happy path (fake camera, expects RENDER ALIVE, no errors)
+- `diagnostic/ball-toss-watchdog-test.mjs` -- kills rAF after 5 frames, expects watchdog stall detection + pump-driven RENDER ALIVE
+
+Both passed on 2026-06-12.
+
+---
+
 ## Issue: Tracking never engages on cold start (tab-away-and-back fixes it)
 
 ### Symptom

@@ -2507,39 +2507,86 @@ let activeBackend = getSetting('backend');
 let lastAnimateTimestamp = -1;
 
 
+// ── Render loop lifecycle ───────────────────────────────────────────
+// Invariant: at most ONE requestAnimationFrame registration is ever
+// outstanding, tracked by its handle in renderLoop.rafId. Duplicate
+// chains are structurally impossible, so no timestamp dedupe is needed.
+//
+// History: the old dedupe-by-timestamp killed the loop on cold start.
+// Chrome render-suppresses pages reloaded by the COI service worker (no
+// user activation) and freezes the rAF timestamp clock, so two
+// consecutive frames of the ONLY chain shared a timestamp and the dedupe
+// mistook them for a duplicate chain and bailed without rescheduling:
+// frozen scene, heartbeat dead at fps=1, while rVFC-driven tracking kept
+// running underneath. A manual refresh carries user activation and never
+// suppresses, which is why reloading always "fixed" it.
+const renderLoop = {
+  rafId: null,     // pending requestAnimationFrame handle (null = none)
+  lastRun: 0,      // wall-clock time the render body last completed
+  lastRafRun: 0,   // wall-clock time a real rAF-delivered frame last ran
+  pump: null,      // setTimeout fallback driver while rAF is suppressed
+};
+
+function scheduleAnimate() {
+  if (renderLoop.rafId !== null) return;
+  renderLoop.rafId = requestAnimationFrame((ts) => {
+    renderLoop.rafId = null;
+    renderLoop.lastRafRun = performance.now();
+    animate(ts);
+  });
+}
+
+// Direct entry: render a frame right now, outside vsync. Starts the loop
+// (revealSceneUI) and revives it (watchdog, visibilitychange). The body's
+// scheduleAnimate() re-arms real vsync automatically.
+function kickAnimate() {
+  animate(performance.now());
+}
+
+// Watchdog: lives OUTSIDE the rAF chain so it survives when rAF dies.
+// If the loop hasn't rendered for >1s while the page is visible, re-arm
+// rAF and pump frames via setTimeout until rAF-delivered frames resume.
+setInterval(() => {
+  if (document.hidden || !animate._n) return;
+  const stalled = performance.now() - renderLoop.lastRun;
+  if (stalled < 1000) return;
+  log('lifecycle', `[watchdog] render loop stalled ${Math.round(stalled)}ms while visible -- re-arming rAF + pumping`);
+  if (renderLoop.rafId !== null) {
+    cancelAnimationFrame(renderLoop.rafId);
+    renderLoop.rafId = null;
+  }
+  scheduleAnimate();
+  if (!renderLoop.pump) {
+    renderLoop.pump = setInterval(() => {
+      if (performance.now() - renderLoop.lastRafRun < 100) {
+        clearInterval(renderLoop.pump);
+        renderLoop.pump = null;
+        log('lifecycle', '[watchdog] rAF frames resumed -- pump off');
+        return;
+      }
+      if (!document.hidden && performance.now() - renderLoop.lastRun > 25) kickAnimate();
+    }, 16);
+  }
+}, 1000);
+
 function animate(timestamp) {
   if (!animate._n) animate._n = 0;
   animate._n++;
   if (animate._n === 1) log('lifecycle', '[lifecycle] animate() first call');
-  if (animate._n >= 2 && animate._n <= 6) log('lifecycle', `[lifecycle] animate() frame ${animate._n} ts=${timestamp} lastTs=${lastAnimateTimestamp}`);
+  if (animate._n >= 2 && animate._n <= 6) log('lifecycle', `[lifecycle] animate() frame ${animate._n} ts=${timestamp.toFixed(1)} lastTs=${lastAnimateTimestamp.toFixed(1)}`);
   if (animate._n % 300 === 0) log('lifecycle', `[lifecycle] animate() frame ${animate._n} (ts=${timestamp.toFixed(0)})`);
-  // Dedupe parallel animate chains: when the tab is hidden then re-shown,
-  // the throttled-old rAF and the visibilitychange-spawned new rAF can both
-  // fire in the same frame. Same-frame rAF callbacks share a timestamp, so
-  // the second one returns here and the chain merges back into one.
   if (timestamp === lastAnimateTimestamp) {
-    log('lifecycle', `[lifecycle] animate() DEDUPE BAIL frame ${animate._n} ts=${timestamp.toFixed(0)} -- duplicate chain merged`);
-    return;
+    // Frozen rAF timestamp clock = render-suppressed page state. Purely
+    // diagnostic now; the single-registration invariant means this is
+    // always the one real chain, so keep rendering.
+    log('lifecycle', `[lifecycle] animate() frozen rAF timestamp at frame ${animate._n} (ts=${timestamp.toFixed(0)}) -- continuing`);
   }
   lastAnimateTimestamp = timestamp;
-  requestAnimationFrame(animate);
+  scheduleAnimate();
   if (document.hidden) {
     return;
   }
-  // COI service worker reloads the page without user activation, so Chrome
-  // can throttle rAF to 1fps. Detect this and pump via setTimeout until
-  // rAF un-throttles. The dedup above prevents double-rendering.
-  if (animate._prevTs && timestamp - animate._prevTs > 500) {
-    if (!animate._boosting) {
-      animate._boosting = true;
-      log('lifecycle', '[lifecycle] rAF throttled -- boosting via setTimeout');
-    }
-    setTimeout(() => requestAnimationFrame(animate), 16);
-  } else if (animate._boosting) {
-    animate._boosting = false;
-    log('lifecycle', '[lifecycle] rAF un-throttled -- boost off');
-  }
-  animate._prevTs = timestamp;
+  renderLoop.lastRun = performance.now();
   if (animate._n === 10) log('lifecycle', `[lifecycle] animate() RENDER ALIVE (frame 10, ts=${timestamp.toFixed(0)})`);
   try {
   const dt = clock.getDelta();
@@ -3044,7 +3091,7 @@ function revealSceneUI() {
     });
     syncInterpAdaptiveAvailability();
   }
-  animate();
+  kickAnimate();
 }
 
 async function startCamera() {
@@ -3319,7 +3366,7 @@ document.addEventListener('visibilitychange', () => {
     frameCount = 0;
     lastFpsTime = performance.now();
     log('lifecycle', `[lifecycle] visibilitychange RESTARTING animate + rVFC`);
-    requestAnimationFrame(animate);
+    kickAnimate();
     if (activeBackend === 'mediapipe') {
       if (mediapipeMode === 'standard' && mpStdVfcRunning) {
         video.requestVideoFrameCallback(sendMediaPipeStandardFrames);
