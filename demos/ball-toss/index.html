@@ -120,6 +120,32 @@
     transition: opacity 0.5s ease;
   }
   #status.fade-out { opacity: 0; pointer-events: none; }
+  /* 8-bit boot sequence readout: shown between the Start click and first
+     tracking lock so the system never looks frozen while it warms up.
+     Same pixel language as the start button: hard inset bevel, hard drop
+     shadow, Press Start 2P. */
+  #boot-status {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 18; display: none;
+    font-family: 'Press Start 2P', monospace; font-size: 0.75rem;
+    color: #ccc; background: rgba(10,10,26,0.94);
+    padding: 20px 24px;
+    box-shadow:
+      inset 3px 3px 0 #16213e,
+      inset -3px -3px 0 #060614,
+      6px 6px 0 #0a0a1a;
+    transition: opacity 0.5s ease;
+  }
+  #boot-status.fade-out { opacity: 0; pointer-events: none; }
+  #boot-status .bs-row { display: flex; justify-content: space-between; gap: 28px; line-height: 2.2; }
+  #boot-status .bs-label { color: #888; }
+  #boot-status .bs-val { min-width: 72px; text-align: left; }
+  #boot-status .bs-wait { color: #555; }
+  #boot-status .bs-ok { color: #69f0ae; }
+  #boot-status .bs-fail { color: #ff5252; }
+  #boot-status .bs-pending { color: #4fc3f7; }
+  #boot-status .bs-pending::after { content: '.'; animation: bs-dots 0.9s steps(1) infinite; }
+  @keyframes bs-dots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
   #controls {
     position: fixed; top: 12px; left: 12px; z-index: 10;
     font-size: 1.04rem; color: #ccc;
@@ -393,6 +419,11 @@
 
 
 <div id="status"></div>
+<div id="boot-status">
+  <div class="bs-row"><span class="bs-label">CAMERA</span><span class="bs-val bs-wait" id="bs-camera">--</span></div>
+  <div class="bs-row"><span class="bs-label">MODELS</span><span class="bs-val bs-wait" id="bs-models">--</span></div>
+  <div class="bs-row"><span class="bs-label">TRACKING</span><span class="bs-val bs-wait" id="bs-tracking">--</span></div>
+</div>
 <img id="start-logo" src="../../images/WebGPU_Vision_Logo.png" alt="WebGPU Vision">
 <button id="start-btn">Start Camera</button>
 
@@ -1330,6 +1361,7 @@ let faceRoiState = false;           // sticky: is auto-mode currently in crop st
 function handleFaceResult(face) {
   if (!handleFaceResult._logged) { handleFaceResult._logged = true; log('lifecycle', '[lifecycle] handleFaceResult first call'); }
   if (!face) return;
+  bootUI.trackingSeen();
   const now = performance.now();
   if (face.bbox && lastFacePos && now - lastFacePos.t < FACE_RECOVERY_MS) {
     const dx = face.bbox.cx - lastFacePos.cx;
@@ -1502,6 +1534,7 @@ function handleHandResult(hands, opts = {}) {
   if (visibleHandCount > 0) {
     handLastSeen = now;
     lastHandCount = visibleHandCount;
+    bootUI.trackingSeen();
   }
 
   for (let h = 0; h < 2; h++) {
@@ -2839,6 +2872,53 @@ function animate(timestamp) {
 // ============================================================
 const statusEl = document.getElementById('status');
 
+// ── Boot sequence readout ─────────────────────────────────────────────
+// Drives the #boot-status box between the Start click and first tracking
+// lock. Steps: camera (getUserMedia), models (backend init), tracking
+// (first face or hand actually detected). States: wait, pending, ok, fail.
+const bootUI = {
+  finished: false,
+  _safetyTimer: null,
+  show() {
+    const el = document.getElementById('boot-status');
+    el.style.display = 'block';
+    el.classList.remove('fade-out');
+    this.set('camera', 'pending');
+    // Never block the view forever (e.g. user out of frame): fade after 12s.
+    clearTimeout(this._safetyTimer);
+    this._safetyTimer = setTimeout(() => this.finish(0), 12000);
+  },
+  set(step, state) {
+    if (this.finished) return;
+    const el = document.getElementById('bs-' + step);
+    if (!el) return;
+    el.className = 'bs-val bs-' + state;
+    el.textContent = state === 'ok' ? 'OK' : state === 'fail' ? 'FAIL' : state === 'wait' ? '--' : '';
+  },
+  // First real detection: flip TRACKING to OK, hold a beat so the user
+  // sees the full green column, then fade.
+  trackingSeen() {
+    if (this.finished) return;
+    this.set('tracking', 'ok');
+    this.finish(800);
+  },
+  finish(delay) {
+    if (this.finished) return;
+    this.finished = true;
+    clearTimeout(this._safetyTimer);
+    const el = document.getElementById('boot-status');
+    setTimeout(() => {
+      el.classList.add('fade-out');
+      setTimeout(() => { el.style.display = 'none'; }, 600);
+    }, delay);
+  },
+  hide() {
+    this.finished = true;
+    clearTimeout(this._safetyTimer);
+    document.getElementById('boot-status').style.display = 'none';
+  },
+};
+
 function updateStatus() {
   if (activeBackend === 'mediapipe') {
     const modeLabel = mediapipeMode === 'standard' ? 'MediaPipe (Std)' : 'MediaPipe (Wkr)';
@@ -2847,6 +2927,8 @@ function updateStatus() {
         if (video.srcObject) statusEl.textContent = 'Loading MediaPipe models...';
       } else if (video.srcObject) {
         document.getElementById('backend-label').textContent = modeLabel;
+        bootUI.set('models', 'ok');
+        bootUI.set('tracking', 'pending');
       }
     } else {
       const parts = [];
@@ -2855,6 +2937,8 @@ function updateStatus() {
       if (parts.length === 0) {
         if (video.srcObject) {
           document.getElementById('backend-label').textContent = modeLabel;
+          bootUI.set('models', 'ok');
+          bootUI.set('tracking', 'pending');
         }
       } else if (video.srcObject) {
         statusEl.textContent = parts.join(' ');
@@ -3116,17 +3200,17 @@ async function startCamera() {
   // the running render loop.
   loadCameraAndModels().catch(err => {
     console.error('Camera/model load error:', err);
+    bootUI.hide();
     statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.display = 'block';
+    statusEl.classList.remove('fade-out');
   });
 }
 
 async function loadCameraAndModels() {
-  // Show the centered status box only during the camera-loading window.
-  // It started as display:none in the splash; reveal it now, hide it as
-  // soon as the camera is up.
-  statusEl.textContent = 'Starting camera...';
-  statusEl.style.display = 'block';
-  statusEl.classList.remove('fade-out');
+  // Boot readout: CAMERA pending. Each stage flips to OK as it lands;
+  // the box fades after the first real face/hand detection.
+  bootUI.show();
 
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 60 }, latencyMode: 'realtime' }
@@ -3156,10 +3240,10 @@ async function loadCameraAndModels() {
     initSelfViewBtn();
   }
 
-  // Camera is rolling. Hide the status box now -- model loading happens in
-  // the background and the play instructions are no longer shown.
-  statusEl.classList.add('fade-out');
-  setTimeout(() => { statusEl.style.display = 'none'; }, 600);
+  // Camera is rolling; models are next (usually already preloaded, so this
+  // stage often flips to OK near-instantly).
+  bootUI.set('camera', 'ok');
+  bootUI.set('models', 'pending');
 
   // IMPORTANT: do NOT await ML model init here. The camera is already rolling,
   // and model loading (WebGPU InferenceSession creation, MediaPipe WASM init,
@@ -3174,10 +3258,16 @@ async function loadCameraAndModels() {
     initWebGPUBackend().then(ok => {
       if (ok) {
         document.getElementById('backend-label').textContent = 'WebGPU';
+        bootUI.set('models', 'ok');
+        bootUI.set('tracking', 'pending');
       } else {
         console.warn('WebGPU init failed');
+        bootUI.set('models', 'fail');
       }
-    }).catch(err => console.error('WebGPU init error:', err));
+    }).catch(err => {
+      console.error('WebGPU init error:', err);
+      bootUI.set('models', 'fail');
+    });
   } else {
     startMediaPipeActive();
   }
