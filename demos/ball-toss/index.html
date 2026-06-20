@@ -212,14 +212,6 @@
     display: none; width: 240px;
   }
   #self-view canvas { display: block; width: 100%; height: auto; }
-  #palm-preview {
-    position: fixed; bottom: 16px; right: 270px; z-index: 10;
-    border-radius: 8px; overflow: hidden;
-    border: 1px solid #666;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
-    display: none;
-  }
-  #palm-preview canvas { display: block; width: 192px; height: 192px; image-rendering: pixelated; }
 
   /* Hamburger + settings drawer -- slide-in from the left, modeled after
      space-weather-audio's drawer pattern. Contains the filter + interp panels
@@ -449,7 +441,6 @@
 <div id="winner" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; font-size:4rem; font-weight:700; color:#fff; font-family:system-ui,sans-serif;">You Win!</div>
 
 <div id="self-view"><canvas id="self-view-canvas" width="240" height="180"></canvas></div>
-<div id="palm-preview"><canvas id="palm-preview-canvas" width="192" height="192"></canvas></div>
 
 <video id="webcam" autoplay playsinline style="display:none;"></video>
 
@@ -1224,15 +1215,6 @@ const svCanvas = document.getElementById('self-view-canvas');
 const svCtx = svCanvas.getContext('2d');
 const selfViewBtn = document.getElementById('self-view-btn');
 
-const palmPreviewEl = document.getElementById('palm-preview');
-const palmPreviewCanvas = document.getElementById('palm-preview-canvas');
-const palmPreviewCtx = palmPreviewCanvas.getContext('2d');
-function drawPalmPreview(rgbaBuffer) {
-  palmPreviewEl.style.display = 'block';
-  const rgba = new Uint8ClampedArray(rgbaBuffer);
-  const imgData = new ImageData(rgba, 192, 192);
-  palmPreviewCtx.putImageData(imgData, 0, 0);
-}
 
 function updateSelfViewBtn() {
   selfViewBtn.textContent = selfViewVisible ? 'Hide Self' : 'Self View';
@@ -2064,6 +2046,7 @@ async function initWebGPUBackend(silent = false) {
       if (Number.isFinite(savedDup) && savedDup > 0) gpuHandTracker.dupDistPx = savedDup;
       const savedConf = parseFloat(getSetting('handConfThresh'));
       if (Number.isFinite(savedConf)) gpuHandTracker.handFlagThreshold = savedConf;
+      gpuHandTracker.wantPreview = true;
       let savedModel = getSetting('handModel');
       const legacyMap = { '4mb-f32': 'standard-f32', '4mb-f16': 'standard-f16', '10mb-f32': 'large-f32', '10mb-f16': 'large-f16', '2mb-f16': 'standard-f16' };
       if (legacyMap[savedModel]) { savedModel = legacyMap[savedModel]; setSetting('handModel', savedModel); }
@@ -2238,7 +2221,6 @@ function processWebGPUHands() {
     const latency = performance.now() - t0;
     _bench.handLatencies.push(latency);
     _bench.handCounts.push(result.hands ? result.hands.filter(Boolean).length : 0);
-    if (result.palmPreview) drawPalmPreview(result.palmPreview);
     if (result.hands && result.hands.some(Boolean)) {
       handleHandResult(result.hands, { stable: true });
     } else {
@@ -3225,6 +3207,13 @@ async function loadCameraAndModels() {
     if (e.name !== 'AbortError') throw e;
   }
   log('lifecycle', `[lifecycle] camera live (${video.videoWidth}x${video.videoHeight})`);
+
+  // If the GPU preload already ran startWebGPUVfcLoop() before the camera was
+  // ready, wgpuVfcRunning is true but the rVFC chain never started (srcObject
+  // was false). Now that the stream is live, kick it.
+  if (wgpuVfcRunning && !wgpuVfcChainActive) {
+    startWebGPUVfcLoop();
+  }
 
   // Size self-view canvas to match actual video aspect ratio
   if (video.videoWidth && video.videoHeight) {

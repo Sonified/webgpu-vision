@@ -54,14 +54,14 @@ class PalmWorker {
     });
   }
 
-  detect(frame) {
+  detect(frame, { wantPreview = false } = {}) {
     if (!this.ready) {
       frame.close();
       return Promise.resolve({ detections: [], letterbox: {} });
     }
     return new Promise((resolve) => {
       this.pendingResolve = resolve;
-      this.worker.postMessage({ type: 'detect', bitmap: frame, frame }, [frame]);
+      this.worker.postMessage({ type: 'detect', bitmap: frame, frame, wantPreview }, [frame]);
     });
   }
 
@@ -230,6 +230,7 @@ export class HandTracker {
     // near-exact centroid overlap triggers dedup; larger = more aggressive.
     this.dupDistPx = 25;
     this.handFlagThreshold = HAND_FLAG_THRESHOLD;
+    this.wantPreview = false;
   }
 
   async init(onStatus, { variant = 'standard-f16' } = {}) {
@@ -389,7 +390,7 @@ export class HandTracker {
         this._palmDetN++;
         const pdn = this._palmDetN;
         const pdt0 = performance.now();
-        this.palmWorker.detect(frame).then((result) => {
+        this.palmWorker.detect(frame, { wantPreview: this.wantPreview }).then((result) => {
           this.palmDetecting = false;
           if (pdn <= 5) log('lifecycle', `[lifecycle] palm detect #${pdn} resolved: ${result.detections.length} dets (${(performance.now() - pdt0).toFixed(1)}ms)`);
           if (result.previewRGBA) this._lastPreview = result.previewRGBA;

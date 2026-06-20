@@ -193,37 +193,41 @@ self.onmessage = async (e) => {
 
   if (type === 'detect') {
     try {
-      const { frame } = e.data;
+      const { frame, wantPreview } = e.data;
 
       // GPU letterbox: upload frame + write uniforms
       const letterbox = gpuLetterbox(frame);
       frame.close();
 
-      // Single encoder: letterbox + inference + readback in one submit
+      // Single encoder: letterbox + inference (+ optional preview copy) in one submit
       const enc = device.createCommandEncoder();
       encodeLetterbox(enc);
 
       runner.encodeInto(enc);
-      enc.copyBufferToBuffer(letterboxOutputBuf, 0, previewReadBuf, 0, previewReadBuf.size);
+      if (wantPreview) {
+        enc.copyBufferToBuffer(letterboxOutputBuf, 0, previewReadBuf, 0, previewReadBuf.size);
+      }
       device.queue.submit([enc.finish()]);
       const outputs = await runner.readOutputs();
 
       // Read back letterbox for preview (NCHW float32 -> RGBA uint8)
       let previewRGBA = null;
-      try {
-        await previewReadBuf.mapAsync(GPUMapMode.READ);
-        const nchw = new Float32Array(previewReadBuf.getMappedRange().slice(0));
-        previewReadBuf.unmap();
-        const S = PALM_SIZE * PALM_SIZE;
-        const rgba = new Uint8ClampedArray(S * 4);
-        for (let i = 0; i < S; i++) {
-          rgba[i * 4]     = nchw[i] * 255;
-          rgba[i * 4 + 1] = nchw[S + i] * 255;
-          rgba[i * 4 + 2] = nchw[2 * S + i] * 255;
-          rgba[i * 4 + 3] = 255;
-        }
-        previewRGBA = rgba.buffer;
-      } catch (_) {}
+      if (wantPreview) {
+        try {
+          await previewReadBuf.mapAsync(GPUMapMode.READ);
+          const nchw = new Float32Array(previewReadBuf.getMappedRange().slice(0));
+          previewReadBuf.unmap();
+          const S = PALM_SIZE * PALM_SIZE;
+          const rgba = new Uint8ClampedArray(S * 4);
+          for (let i = 0; i < S; i++) {
+            rgba[i * 4]     = nchw[i] * 255;
+            rgba[i * 4 + 1] = nchw[S + i] * 255;
+            rgba[i * 4 + 2] = nchw[2 * S + i] * 255;
+            rgba[i * 4 + 3] = 255;
+          }
+          previewRGBA = rgba.buffer;
+        } catch (_) {}
+      }
 
       // Decode outputs -- find regressors (dim 18) and scores (dim 1)
       let regressors, scores;
