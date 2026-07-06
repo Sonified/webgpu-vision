@@ -233,7 +233,17 @@ export class HandTracker {
     this.wantPreview = false;
   }
 
-  async init(onStatus, { variant = 'standard-f16' } = {}) {
+  async init(onStatus, { variant = 'standard-f16', palmEngine } = {}) {
+    // Selecting the palm engine BEFORE init avoids booting a backend that
+    // will immediately be discarded (and, under Vite dev, the ORT worker's
+    // WASM fetch can fail outright -- WGSL consumers should never touch it).
+    if (palmEngine && palmEngine !== this.palmWorker.label) {
+      this.palmWorker.terminate();
+      const url = palmEngine === 'wgsl'
+        ? new URL('./palm-worker-wgsl.js', import.meta.url)
+        : new URL('./palm-worker.js', import.meta.url);
+      this.palmWorker = new PalmWorker(url, palmEngine);
+    }
     onStatus?.('Loading palm detection worker...');
     await this.palmWorker.init(PALM_MODEL_URL);
 
@@ -251,8 +261,11 @@ export class HandTracker {
     if (!this.ready || this.running) return { hands: [] };
     this.running = true;
 
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    // Accept either an HTMLVideoElement or a WebCodecs VideoFrame (e.g. from
+    // MediaStreamTrackProcessor). Both are valid sources for the
+    // `new VideoFrame(video)` clones below; only the size props differ.
+    const vw = video.videoWidth || video.displayWidth;
+    const vh = video.videoHeight || video.displayHeight;
 
     try {
       // --- 1. Pending palm detections: route new hands into empty slots ---
