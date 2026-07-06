@@ -336,6 +336,41 @@ The ball-toss demo has a bespoke settings system (hand-rolled `getSetting`/`setS
 
 These are tracked here so they do not get lost; none are blocking a release.
 
+### Latency PoC: MSTP delivery + same-frame consume (NEW 2026-07-05)
+
+`demos/latency-poc/` is a self-contained proof of concept for two frame-latency wins,
+each toggleable against the ball-toss baseline behavior (same `HandTracker`, same WGSL workers):
+
+1. **Delivery**: `MediaStreamTrackProcessor` hands us camera `VideoFrame`s the moment
+   capture produces them, vs `requestVideoFrameCallback` which is vsync-aligned (the
+   frame sits in the video element until the next rendering opportunity).
+2. **Consume**: draw the overlay inside the inference `.then()` (catches the current
+   compositor commit) vs storing the result for the next rAF (ball-toss behavior).
+
+Measurement design: BOTH delivery sinks run simultaneously; the inactive one is a shadow.
+Frames are matched by causality (the MSTP arrival for a frame always precedes its rVFC
+callback), so "MSTP head-start" is a direct same-frame wall-clock comparison, and glass
+latency (capture→draw) comes from rVFC `metadata.captureTime` in both modes. Stats logged
+as `[LATENCY]` once per 2s + live HUD. Keys: D toggles delivery, C toggles consume.
+
+There are two pages: `demos/latency-poc/index.html` (one pipeline, D/C keys toggle each
+trick live, shadow-measured `[LATENCY]` console reports) and `demos/latency-poc/versus.html`
+(side-by-side: two independent HandTracker instances on the same camera, left = baseline,
+right = both tricks, per-panel capture→draw readouts + `[VERSUS]` reports).
+
+Headless smoke test (fake camera, no hands, so inference ~0.1ms): MSTP head-start
++5-10ms measured; result→draw 5.4ms → 0.0ms with immediate consume; capture→draw
+11.0ms → 1.1ms with both toggles on. Versus page headless: baseline ~22-26ms
+capture→draw vs low-lat ~0.5ms, steady advantage ~21-24ms. **Needs a real-browser session with real hands
+for production numbers.** Supporting library changes: `pipeline.js` `processFrame()` now
+accepts a `VideoFrame` as well as a video element (`videoWidth || displayWidth`), and
+`HandTracker.init()` takes `{ palmEngine: 'wgsl' }` so WGSL consumers never boot the ORT
+palm worker first (whose WASM fetch fails under Vite dev -- the old boot order broke there).
+
+If the real-camera numbers hold up: MSTP delivery belongs in the library init path
+(ideally reading in a worker, which is where the spec wants MSTP anyway), and ball-toss's
+`handleHandResult` should mark-dirty + draw immediately instead of waiting for `animate()`.
+
 ### Investigate: why hand pipeline gets ~10x speedup but face only ~2-3x
 
 Live ball-toss bench on M1 Max, post-Phase-1.5, shows:

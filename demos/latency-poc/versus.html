@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Latency Versus — baseline vs low-latency, side by side</title>
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; background: #0a0a0a; color: #ccc; font-family: ui-monospace, Menlo, monospace; }
+  #banner {
+    text-align: center; padding: 10px; font-size: 14px;
+  }
+  #banner .delta { color: #7CFC90; font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+  #panels { display: flex; gap: 12px; justify-content: center; padding: 0 12px; }
+  .panel { flex: 1; max-width: 48vw; }
+  .panel h2 { font-size: 13px; font-weight: 400; margin: 0 0 6px; text-align: center; letter-spacing: 0.5px; }
+  .panel.base h2 { color: #ff8a80; }
+  .panel.fast h2 { color: #7CFC90; }
+  .frame { position: relative; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
+  .panel.base .frame { border-color: #5a3030; }
+  .panel.fast .frame { border-color: #2f5a38; }
+  .frame video, .frame canvas {
+    display: block; width: 100%; height: auto;
+    transform: scaleX(-1); /* mirror */
+  }
+  .frame canvas { position: absolute; top: 0; left: 0; }
+  .readout { text-align: center; padding: 8px 0 2px; font-size: 13px; line-height: 1.7; }
+  .readout .glass { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .panel.base .glass { color: #ff8a80; }
+  .panel.fast .glass { color: #7CFC90; }
+  .readout .sub { color: #777; font-size: 11px; }
+  #status { text-align: center; color: #888; font-size: 12px; padding: 10px; }
+</style>
+</head>
+<body>
+<div id="banner">capture &rarr; draw, same camera, same models &mdash; low-latency advantage: <span class="delta" id="delta">--</span></div>
+<div id="panels">
+  <div class="panel base">
+    <h2>WITHOUT &mdash; baseline (rVFC delivery + next-rAF draw)</h2>
+    <div class="frame"><video id="videoA" autoplay muted playsinline></video><canvas id="canvasA"></canvas></div>
+    <div class="readout"><span class="glass" id="glassA">--</span><br><span class="sub" id="subA">capture&rarr;draw</span></div>
+  </div>
+  <div class="panel fast">
+    <h2>WITH &mdash; low-latency (TrackProcessor delivery + immediate draw)</h2>
+    <div class="frame"><video id="videoB" autoplay muted playsinline></video><canvas id="canvasB"></canvas></div>
+    <div class="readout"><span class="glass" id="glassB">--</span><br><span class="sub" id="subB">capture&rarr;draw</span></div>
+  </div>
+</div>
+<div id="status">booting...</div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Side-by-side latency comparison. Two independent HandTracker instances run
+// the SAME models on the SAME camera stream:
+//
+//   LEFT  (baseline): frames via requestVideoFrameCallback (vsync-aligned),
+//                     results stored and drawn by the next rAF -- exactly the
+//                     ball-toss architecture today.
+//   RIGHT (low-lat):  frames via MediaStreamTrackProcessor (delivered the
+//                     moment capture produces them), overlay drawn inside the
+//                     inference .then() -- the two tricks from the PoC.
+//
+// Wave a hand fast: the right wireframe should hug the hand while the left
+// trails. Numbers under each panel = capture->draw glass latency (from rVFC
+// metadata.captureTime, matched causally for the MSTP side). GPU contention
+// from running two pipelines hits both panels equally, so the DELTA is fair.
+// ---------------------------------------------------------------------------
+import { HandTracker } from '../../src/pipeline.js';
+
+const statusEl = document.getElementById('status');
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17],
+];
+
+function makePanel(name, videoId, canvasId, color) {
+  return {
+    name, color,
+    video: document.getElementById(videoId),
+    canvas: document.getElementById(canvasId),
+    ctx: document.getElementById(canvasId).getContext('2d'),
+    tracker: new HandTracker(),
+    ready: false, busy: false,
+    latest: null,               // { hands, key, tResult, pendingDraw }
+    capBy: new Map(),           // frame key -> captureTime (performance clock)
+    stats: { infer: [], glass: [], fed: 0 },
+    pendingGlass: [],           // { key, tDraw }
+  };
+}
+const A = makePanel('baseline', 'videoA', 'canvasA', '#ff8a80'); // rVFC + rAF
+const B = makePanel('low-lat', 'videoB', 'canvasB', '#7CFC90');  // MSTP + immediate
+
+function capPrune(p) {
+  if (p.capBy.size > 300) {
+    for (const k of p.capBy.keys()) { p.capBy.delete(k); if (p.capBy.size <= 240) break; }
+  }
+}
+
+function feed(p, source, key) {
+  const isVF = typeof VideoFrame !== 'undefined' && source instanceof VideoFrame;
+  if (!p.ready || p.busy) { if (isVF) source.close(); return; }
+  p.busy = true;
+  p.stats.fed++;
+  const t0 = performance.now();
+  let promise;
+  try {
+    promise = p.tracker.processFrame(source);
+  } finally {
+    if (isVF) source.close(); // processFrame clones synchronously
+  }
+  promise.then((result) => {
+    p.busy = false;
+    const tResult = performance.now();
+    p.stats.infer.push(tResult - t0);
+    p.latest = { hands: result.hands || [], key, tResult, pendingDraw: true };
+    if (p === B) draw(p); // low-lat panel: draw immediately in the .then()
+  }).catch((err) => { p.busy = false; console.error(`[VERSUS] ${p.name} processFrame error`, err); });
+}
+
+function draw(p) {
+  if (!p.latest || !p.latest.pendingDraw) return;
+  p.latest.pendingDraw = false;
+  const tDraw = performance.now();
+  p.pendingGlass.push({ key: p.latest.key, tDraw });
+
+  const { ctx, canvas } = p;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const hand of p.latest.hands) {
+    if (!hand || !hand.landmarks) continue;
+    const lm = hand.landmarks;
+    ctx.strokeStyle = p.color;
+    ctx.fillStyle = p.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const [a, b] of HAND_CONNECTIONS) {
+      ctx.moveTo(lm[a].x * canvas.width, lm[a].y * canvas.height);
+      ctx.lineTo(lm[b].x * canvas.width, lm[b].y * canvas.height);
+    }
+    ctx.stroke();
+    for (const pt of lm) {
+      ctx.beginPath();
+      ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// --- baseline delivery: rVFC on video A (also provides its captureTime) ----
+function rvfcTickA(now, meta) {
+  const key = Math.round(meta.mediaTime * 1000);
+  // captureTime missing on some platforms (macOS Chrome); receiveTime is a
+  // slightly conservative stand-in (browser-received, not camera-captured).
+  const cap = meta.captureTime ?? meta.receiveTime;
+  if (cap !== undefined) A.capBy.set(key, cap);
+  capPrune(A);
+  feed(A, A.video, key);
+  A.video.requestVideoFrameCallback(rvfcTickA);
+}
+
+// --- low-lat delivery: MSTP reader + shadow rVFC on video B for captureTime --
+const mstpRecent = []; // [{ key, t, matched }]
+async function mstpLoop(stream) {
+  const track = stream.getVideoTracks()[0].clone();
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  for (;;) {
+    const { value: frame, done } = await reader.read();
+    if (done) break;
+    const t = performance.now();
+    const key = Math.round(frame.timestamp / 1000);
+    mstpRecent.push({ key, t, matched: false });
+    if (mstpRecent.length > 30) mstpRecent.shift();
+    feed(B, frame, key); // closes the frame
+  }
+}
+function rvfcTickB(now, meta) {
+  // Shadow only: causally match this vsync-aligned callback to the most
+  // recent MSTP arrival to give B's frame keys a captureTime.
+  const t = performance.now();
+  let m = null;
+  for (let i = mstpRecent.length - 1; i >= 0; i--) {
+    if (mstpRecent[i].t <= t + 0.5) { m = mstpRecent[i]; break; }
+  }
+  const cap = meta.captureTime ?? meta.receiveTime;
+  if (m && !m.matched && t - m.t < 100 && cap !== undefined) {
+    m.matched = true;
+    B.capBy.set(m.key, cap);
+    capPrune(B);
+  }
+  B.video.requestVideoFrameCallback(rvfcTickB);
+}
+
+// --- render loop: baseline consume + 2s reports ------------------------------
+const mp = (arr) => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((x, y) => x - y);
+  return { mean: arr.reduce((x, y) => x + y) / arr.length, p95: s[Math.floor(s.length * 0.95)], n: arr.length };
+};
+const fmt = (m) => m ? `${m.mean.toFixed(1)}ms` : '--';
+
+let lastReport = performance.now();
+function rafLoop() {
+  requestAnimationFrame(rafLoop);
+  draw(A); // baseline panel: next-rAF consumption
+
+  const now = performance.now();
+  if (now - lastReport < 2000) return;
+  lastReport = now;
+  for (const p of [A, B]) {
+    for (const g of p.pendingGlass) {
+      const cap = p.capBy.get(g.key);
+      if (cap !== undefined) p.stats.glass.push(g.tDraw - cap);
+    }
+    p.pendingGlass.length = 0;
+  }
+  const gA = mp(A.stats.glass), gB = mp(B.stats.glass);
+  const iA = mp(A.stats.infer), iB = mp(B.stats.infer);
+  const delta = gA && gB ? gA.mean - gB.mean : null;
+  console.log(
+    `[VERSUS] baseline capture→draw ${gA ? `${gA.mean.toFixed(1)}ms (p95 ${gA.p95.toFixed(1)})` : '--'} | ` +
+    `low-lat capture→draw ${gB ? `${gB.mean.toFixed(1)}ms (p95 ${gB.p95.toFixed(1)})` : '--'} | ` +
+    `advantage ${delta !== null ? delta.toFixed(1) + 'ms' : '--'} | ` +
+    `infer A ${fmt(iA)} B ${fmt(iB)} | fed A ${A.stats.fed} B ${B.stats.fed}`
+  );
+  document.getElementById('glassA').textContent = gA ? `${gA.mean.toFixed(1)} ms` : '--';
+  document.getElementById('subA').textContent = gA ? `capture→draw · p95 ${gA.p95.toFixed(1)}ms · infer ${fmt(iA)}` : 'capture→draw';
+  document.getElementById('glassB').textContent = gB ? `${gB.mean.toFixed(1)} ms` : '--';
+  document.getElementById('subB').textContent = gB ? `capture→draw · p95 ${gB.p95.toFixed(1)}ms · infer ${fmt(iB)}` : 'capture→draw';
+  document.getElementById('delta').textContent = delta !== null ? `+${delta.toFixed(1)} ms` : '--';
+  for (const p of [A, B]) { p.stats.glass = []; p.stats.infer = []; p.stats.fed = 0; }
+}
+
+// --- boot ---------------------------------------------------------------------
+(async () => {
+  if (!('MediaStreamTrackProcessor' in window)) {
+    statusEl.textContent = 'MediaStreamTrackProcessor unsupported in this browser -- the right panel needs it.';
+    return;
+  }
+  statusEl.textContent = 'requesting camera...';
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: 'user',
+      width: { ideal: 480 }, height: { ideal: 360 },
+      frameRate: { ideal: 60 },
+      latency: { ideal: 0 },
+    },
+  });
+  A.video.srcObject = stream;
+  B.video.srcObject = stream;
+  for (const v of [A.video, B.video]) {
+    try { await v.play(); } catch (e) { if (e.name !== 'AbortError') throw e; }
+  }
+  for (const p of [A, B]) {
+    p.canvas.width = p.video.videoWidth;
+    p.canvas.height = p.video.videoHeight;
+  }
+
+  statusEl.textContent = 'loading models (baseline panel)...';
+  await A.tracker.init((m) => { statusEl.textContent = `baseline: ${m}`; }, { palmEngine: 'wgsl' });
+  A.ready = true;
+  statusEl.textContent = 'loading models (low-lat panel)...';
+  await B.tracker.init((m) => { statusEl.textContent = `low-lat: ${m}`; }, { palmEngine: 'wgsl' });
+  B.ready = true;
+
+  A.video.requestVideoFrameCallback(rvfcTickA);
+  B.video.requestVideoFrameCallback(rvfcTickB);
+  mstpLoop(stream);
+  rafLoop();
+  statusEl.textContent = 'tracking -- wave a hand fast and compare the wireframes';
+
+  console.log('%c[VERSUS] left = ball-toss baseline (rVFC + next-rAF). right = TrackProcessor + immediate draw.\n' +
+    'Same camera, same models, two independent pipelines. [VERSUS] report every 2s.', 'color:#7CFC90');
+})().catch((err) => {
+  statusEl.textContent = 'BOOT FAILED: ' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>

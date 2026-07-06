@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Latency PoC — MSTP + same-frame consume</title>
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; background: #0a0a0a; color: #ccc; font-family: ui-monospace, Menlo, monospace; overflow: hidden; }
+  #stage { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  video, canvas#overlay {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scaleX(-1); /* mirror */
+    max-width: 100vw; max-height: 100vh;
+  }
+  #hud {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    background: rgba(10,10,10,0.85); border: 1px solid #333; border-radius: 6px;
+    padding: 12px 14px; font-size: 12px; line-height: 1.7; min-width: 300px;
+  }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .val { color: #4fc3f7; font-variant-numeric: tabular-nums; text-align: right; }
+  #hud .val.good { color: #7CFC90; }
+  #hud .divider { border-top: 1px solid #333; margin: 8px 0; }
+  button {
+    background: #1a1a2e; color: #ccc; border: 1px solid #444; border-radius: 4px;
+    padding: 5px 10px; font-family: inherit; font-size: 12px; cursor: pointer; width: 100%;
+    margin-bottom: 6px; text-align: left;
+  }
+  button.lowlat { border-color: #7CFC90; color: #7CFC90; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #status { position: fixed; bottom: 12px; left: 12px; z-index: 10; font-size: 12px; color: #888; }
+  .hint { color: #666; font-size: 10px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" autoplay muted playsinline></video>
+  <canvas id="overlay"></canvas>
+</div>
+<div id="hud">
+  <button id="btn-delivery">DELIVERY: rVFC (baseline)</button>
+  <button id="btn-consume">CONSUME: next rAF (baseline)</button>
+  <div class="hint">keys: D = delivery, C = consume</div>
+  <div class="divider"></div>
+  <div class="row"><span>camera</span><span class="val" id="s-cam">--</span></div>
+  <div class="row"><span>MSTP head-start vs rVFC</span><span class="val" id="s-adv">--</span></div>
+  <div class="row"><span>inference</span><span class="val" id="s-infer">--</span></div>
+  <div class="row"><span>result &rarr; draw</span><span class="val" id="s-consume">--</span></div>
+  <div class="row"><span>arrival &rarr; draw</span><span class="val" id="s-total">--</span></div>
+  <div class="row"><span>capture &rarr; draw (glass)</span><span class="val" id="s-glass">--</span></div>
+</div>
+<div id="status">booting...</div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Latency proof-of-concept, built on the ball-toss architecture (same
+// HandTracker, same WGSL workers, same rVFC baseline).
+//
+// Two independent toggles, each OFF = exactly what ball-toss does today:
+//
+//   DELIVERY  rVFC:  frames come from video.requestVideoFrameCallback,
+//                    which is vsync-aligned -- a captured frame sits in the
+//                    video element until the next rendering opportunity.
+//             MSTP:  MediaStreamTrackProcessor hands us the VideoFrame the
+//                    moment capture produces it. No vsync alignment.
+//
+//   CONSUME   rAF:   inference results are stored and picked up by the next
+//                    requestAnimationFrame (ball-toss behavior) -- up to a
+//                    full display frame of pure queueing.
+//             immediate: the overlay is drawn in the inference .then(),
+//                    catching the CURRENT compositor commit instead of
+//                    waiting for the next one.
+//
+// Measurement: BOTH delivery mechanisms run all the time. The inactive one
+// is a shadow. Frames are matched by their capture timestamp (rVFC
+// metadata.mediaTime === VideoFrame.timestamp, both derived from the same
+// PTS), so "MSTP head-start" is a direct same-frame, same-clock comparison.
+// Glass latency uses rVFC metadata.captureTime (performance-clock time the
+// camera captured the frame), resolved lazily since the shadow rVFC for a
+// frame can fire AFTER an MSTP-delivered result has already drawn.
+// ---------------------------------------------------------------------------
+import { HandTracker } from '../../src/pipeline.js';
+
+const video = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const statusEl = document.getElementById('status');
+const btnDelivery = document.getElementById('btn-delivery');
+const btnConsume = document.getElementById('btn-consume');
+
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17],
+];
+const SLOT_COLORS = ['#4fc3f7', '#ffb74d'];
+
+const mstpSupported = 'MediaStreamTrackProcessor' in window;
+
+// --- mode state -------------------------------------------------------------
+let delivery = 'rvfc';   // 'rvfc' | 'mstp'
+let consume = 'raf';     // 'raf'  | 'immediate'
+
+// --- frame matching ----------------------------------------------------------
+// rVFC mediaTime and MSTP VideoFrame.timestamp don't reliably share an epoch,
+// so we match frames by CAUSALITY instead of PTS: the MSTP sink always
+// receives a frame BEFORE the vsync-aligned rVFC callback for that same
+// frame fires. So at each rVFC tick, the most recent unmatched MSTP arrival
+// that precedes it is the same frame. The wall-clock gap between the two IS
+// the head-start (only ambiguous if the gap ever exceeds one camera frame
+// interval, which would itself be a finding).
+const capByKey = new Map(); // fed-frame key -> captureTime (performance clock)
+const mstpRecent = [];      // [{ key, t, matched }] in arrival order
+function capPrune() {
+  if (capByKey.size > 300) {
+    for (const k of capByKey.keys()) { capByKey.delete(k); if (capByKey.size <= 240) break; }
+  }
+}
+
+// --- rolling stats, reported + reset every 2s -------------------------------
+const stats = { adv: [], infer: [], consume: [], total: [], glass: [], camFrames: 0, skipped: 0, fed: 0 };
+const pendingGlass = []; // { key, tDraw } resolved at report time (cap may arrive late)
+function mp(arr) { // mean / p95
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  return { mean: arr.reduce((a, b) => a + b) / arr.length, p95: s[Math.floor(s.length * 0.95)], n: arr.length };
+}
+const fmt = (m, plus) => m ? `${plus && m.mean > 0 ? '+' : ''}${m.mean.toFixed(1)}ms (p95 ${m.p95.toFixed(1)})` : '--';
+
+// --- tracker ----------------------------------------------------------------
+const tracker = new HandTracker();
+let trackerReady = false;
+let busy = false;
+let inFlight = null;   // { key, tArrival, t0 }
+let latest = null;     // { hands, key, tArrival, tResult, pendingDraw }
+
+function feedFrame(source, key, tArrival) {
+  const isVF = typeof VideoFrame !== 'undefined' && source instanceof VideoFrame;
+  if (!trackerReady || busy) {
+    stats.skipped++;
+    if (isVF) source.close();
+    return;
+  }
+  busy = true;
+  stats.fed++;
+  const flight = { key, tArrival, t0: performance.now() };
+  inFlight = flight;
+  let p;
+  try {
+    p = tracker.processFrame(source);
+  } finally {
+    // processFrame clones the source into per-worker VideoFrames
+    // synchronously (before its first await), so ours can close now.
+    if (isVF) source.close();
+  }
+  p.then((result) => {
+    busy = false;
+    const tResult = performance.now();
+    stats.infer.push(tResult - flight.t0);
+    latest = { hands: result.hands || [], key: flight.key, tArrival: flight.tArrival, tResult, pendingDraw: true };
+    if (consume === 'immediate') draw();
+  }).catch((err) => { busy = false; console.error('[LATENCY] processFrame error', err); });
+}
+
+// --- delivery: rVFC (always registered; shadow when MSTP is active) ---------
+function rvfcTick(now, meta) {
+  const t = performance.now();
+  const key = Math.round(meta.mediaTime * 1000);
+  stats.camFrames++; // rVFC fires once per camera frame: use as camera fps
+  // captureTime is the true camera-capture moment but Chrome doesn't
+  // populate it on all platforms (notably macOS). receiveTime (when the
+  // browser received the frame) is a slightly conservative stand-in.
+  const cap = meta.captureTime ?? meta.receiveTime;
+  if (cap !== undefined) capByKey.set(key, cap);
+
+  // Causal match: latest unmatched MSTP arrival that precedes this callback.
+  let m = null;
+  for (let i = mstpRecent.length - 1; i >= 0; i--) {
+    if (mstpRecent[i].t <= t + 0.5) { m = mstpRecent[i]; break; }
+  }
+  if (m && !m.matched && t - m.t < 100) {
+    m.matched = true;
+    stats.adv.push(t - m.t);
+    // Give the MSTP-keyed frame the rVFC-sourced capture stamp so glass
+    // latency resolves in MSTP delivery mode too.
+    if (cap !== undefined) capByKey.set(m.key, cap);
+  }
+  capPrune();
+
+  if (delivery === 'rvfc') feedFrame(video, key, t);
+  video.requestVideoFrameCallback(rvfcTick);
+}
+
+// --- delivery: MediaStreamTrackProcessor (always reading; shadow when rVFC active)
+async function mstpLoop(stream) {
+  // Clone the track so the processor is an independent sink from the <video>.
+  const track = stream.getVideoTracks()[0].clone();
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  for (;;) {
+    const { value: frame, done } = await reader.read();
+    if (done) break;
+    const t = performance.now();
+    const key = Math.round(frame.timestamp / 1000);
+    mstpRecent.push({ key, t, matched: false });
+    if (mstpRecent.length > 30) mstpRecent.shift();
+    if (delivery === 'mstp') feedFrame(frame, key, t); // feedFrame closes it
+    else frame.close();
+  }
+}
+
+// --- drawing -----------------------------------------------------------------
+function draw() {
+  if (!latest || !latest.pendingDraw) return;
+  latest.pendingDraw = false;
+  const tDraw = performance.now();
+  stats.consume.push(tDraw - latest.tResult);
+  stats.total.push(tDraw - latest.tArrival);
+  pendingGlass.push({ key: latest.key, tDraw });
+
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  for (let s = 0; s < latest.hands.length; s++) {
+    const hand = latest.hands[s];
+    if (!hand || !hand.landmarks) continue;
+    const lm = hand.landmarks;
+    ctx.strokeStyle = SLOT_COLORS[s % 2];
+    ctx.fillStyle = SLOT_COLORS[s % 2];
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const [a, b] of HAND_CONNECTIONS) {
+      ctx.moveTo(lm[a].x * overlay.width, lm[a].y * overlay.height);
+      ctx.lineTo(lm[b].x * overlay.width, lm[b].y * overlay.height);
+    }
+    ctx.stroke();
+    for (const p of lm) {
+      ctx.beginPath();
+      ctx.arc(p.x * overlay.width, p.y * overlay.height, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// --- render loop: baseline consume path + periodic report --------------------
+let lastReport = performance.now();
+function rafLoop() {
+  requestAnimationFrame(rafLoop);
+  if (consume === 'raf') draw();
+
+  const now = performance.now();
+  if (now - lastReport >= 2000) {
+    // Resolve glass samples whose captureTime has arrived via (shadow) rVFC.
+    for (const g of pendingGlass) {
+      const cap = capByKey.get(g.key);
+      if (cap !== undefined) stats.glass.push(g.tDraw - cap);
+    }
+    pendingGlass.length = 0;
+
+    const adv = mp(stats.adv), infer = mp(stats.infer), cons = mp(stats.consume),
+          total = mp(stats.total), glass = mp(stats.glass);
+    const camFps = stats.camFrames / ((now - lastReport) / 1000);
+    console.log(
+      `[LATENCY] delivery=${delivery} consume=${consume} | ` +
+      `cam ${camFps.toFixed(1)}fps | MSTP head-start ${fmt(adv, true)} | ` +
+      `infer ${fmt(infer)} | result→draw ${fmt(cons)} | ` +
+      `arrival→draw ${fmt(total)} | capture→draw ${fmt(glass)} | ` +
+      `fed ${stats.fed}, skipped ${stats.skipped}`
+    );
+    setHud('s-cam', `${camFps.toFixed(1)} fps`);
+    setHud('s-adv', fmt(adv, true), adv && delivery === 'mstp');
+    setHud('s-infer', fmt(infer));
+    setHud('s-consume', fmt(cons), cons && consume === 'immediate');
+    setHud('s-total', fmt(total));
+    setHud('s-glass', fmt(glass));
+    stats.adv = []; stats.infer = []; stats.consume = []; stats.total = []; stats.glass = [];
+    stats.camFrames = 0; stats.skipped = 0; stats.fed = 0;
+    lastReport = now;
+  }
+}
+function setHud(id, text, good) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.classList.toggle('good', !!good);
+}
+
+// --- toggles ------------------------------------------------------------------
+function resetStats() {
+  stats.adv = []; stats.infer = []; stats.consume = []; stats.total = []; stats.glass = [];
+  stats.camFrames = 0; stats.skipped = 0; stats.fed = 0;
+  pendingGlass.length = 0;
+  lastReport = performance.now();
+}
+function setDelivery(mode) {
+  delivery = mode;
+  btnDelivery.textContent = mode === 'mstp' ? 'DELIVERY: TrackProcessor (low-lat)' : 'DELIVERY: rVFC (baseline)';
+  btnDelivery.classList.toggle('lowlat', mode === 'mstp');
+  console.log(`[LATENCY] === delivery -> ${mode} ===`);
+  resetStats();
+}
+function setConsume(mode) {
+  consume = mode;
+  btnConsume.textContent = mode === 'immediate' ? 'CONSUME: immediate (low-lat)' : 'CONSUME: next rAF (baseline)';
+  btnConsume.classList.toggle('lowlat', mode === 'immediate');
+  console.log(`[LATENCY] === consume -> ${mode} ===`);
+  resetStats();
+}
+btnDelivery.addEventListener('click', () => setDelivery(delivery === 'rvfc' ? 'mstp' : 'rvfc'));
+btnConsume.addEventListener('click', () => setConsume(consume === 'raf' ? 'immediate' : 'raf'));
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'd' || e.key === 'D') btnDelivery.click();
+  if (e.key === 'c' || e.key === 'C') btnConsume.click();
+});
+if (!mstpSupported) {
+  btnDelivery.disabled = true;
+  btnDelivery.textContent = 'DELIVERY: rVFC (MSTP unsupported)';
+}
+
+// --- boot ---------------------------------------------------------------------
+(async () => {
+  console.log('%c[LATENCY] PoC: MediaStreamTrackProcessor delivery + same-frame consume.\n' +
+    'Both delivery paths run simultaneously; frames matched by capture timestamp.\n' +
+    '"MSTP head-start" = how much earlier the TrackProcessor hands us each frame than rVFC does.\n' +
+    '"capture->draw" = glass latency from camera captureTime to overlay draw call.\n' +
+    'Toggle D and C, watch arrival->draw and capture->draw move.', 'color:#7CFC90');
+
+  statusEl.textContent = 'requesting camera...';
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: 'user',
+      width: { ideal: 480 }, height: { ideal: 360 },
+      frameRate: { ideal: 60 },
+      latency: { ideal: 0 },
+    },
+  });
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) { if (e.name !== 'AbortError') throw e; }
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+  // Match the overlay's on-screen box to the video's (both are centered
+  // with max-width/height CSS; equal aspect ratio keeps them congruent).
+  const sizeOverlay = () => {
+    overlay.style.width = video.clientWidth + 'px';
+    overlay.style.height = video.clientHeight + 'px';
+  };
+  sizeOverlay();
+  window.addEventListener('resize', sizeOverlay);
+  statusEl.textContent = `camera ${video.videoWidth}x${video.videoHeight} — loading models...`;
+
+  video.requestVideoFrameCallback(rvfcTick);
+  if (mstpSupported) mstpLoop(stream);
+  rafLoop();
+
+  await tracker.init((msg) => { statusEl.textContent = msg; }, { palmEngine: 'wgsl' });
+  trackerReady = true;
+  statusEl.textContent = 'tracking — D toggles delivery, C toggles consume, watch the console';
+})().catch((err) => {
+  statusEl.textContent = 'BOOT FAILED: ' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>
