@@ -35,3 +35,4 @@ qr-*.png
 # model-urls.js auto-switches: localhost -> /models/, production -> models.now.audio
 # Local models/ dir structure mirrors R2 paths exactly.
 .wrangler/
+.claude/
