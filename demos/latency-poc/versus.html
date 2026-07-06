@@ -46,6 +46,11 @@
     <div class="readout"><span class="glass" id="glassB">--</span><br><span class="sub" id="subB">capture&rarr;draw</span></div>
   </div>
 </div>
+<div id="overlay-row" style="text-align:center; padding: 8px 0 0;">
+  <label style="font-size:12px; color:#aaa; cursor:pointer; user-select:none;">
+    <input type="checkbox" id="show-overlay" checked style="accent-color:#4fc3f7; vertical-align:-2px;"> show hand overlay
+  </label>
+</div>
 <div id="status">booting...</div>
 
 <script type="module">
@@ -68,6 +73,14 @@
 import { HandTracker } from '../../src/pipeline.js';
 
 const statusEl = document.getElementById('status');
+const showOverlayEl = document.getElementById('show-overlay');
+showOverlayEl.checked = localStorage.getItem('poc_showOverlay') !== 'false';
+showOverlayEl.addEventListener('change', () => {
+  localStorage.setItem('poc_showOverlay', showOverlayEl.checked);
+  if (!showOverlayEl.checked) {
+    for (const p of [A, B]) p.ctx.clearRect(0, 0, p.canvas.width, p.canvas.height);
+  }
+});
 const HAND_CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17],
@@ -125,6 +138,7 @@ function draw(p) {
 
   const { ctx, canvas } = p;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!showOverlayEl.checked) return; // stats above still recorded
   for (const hand of p.latest.hands) {
     if (!hand || !hand.landmarks) continue;
     const lm = hand.landmarks;

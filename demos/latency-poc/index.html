@@ -42,6 +42,9 @@
   <button id="btn-delivery">DELIVERY: rVFC (baseline)</button>
   <button id="btn-consume">CONSUME: next rAF (baseline)</button>
   <div class="hint">keys: D = delivery, C = consume</div>
+  <label style="display:block; margin-top:6px; font-size:12px; color:#aaa; cursor:pointer; user-select:none;">
+    <input type="checkbox" id="show-overlay" checked style="accent-color:#4fc3f7; vertical-align:-2px;"> show hand overlay
+  </label>
   <div class="divider"></div>
   <div class="row"><span>camera</span><span class="val" id="s-cam">--</span></div>
   <div class="row"><span>MSTP head-start vs rVFC</span><span class="val" id="s-adv">--</span></div>
@@ -88,6 +91,12 @@ const ctx = overlay.getContext('2d');
 const statusEl = document.getElementById('status');
 const btnDelivery = document.getElementById('btn-delivery');
 const btnConsume = document.getElementById('btn-consume');
+const showOverlayEl = document.getElementById('show-overlay');
+showOverlayEl.checked = localStorage.getItem('poc_showOverlay') !== 'false';
+showOverlayEl.addEventListener('change', () => {
+  localStorage.setItem('poc_showOverlay', showOverlayEl.checked);
+  if (!showOverlayEl.checked) ctx.clearRect(0, 0, overlay.width, overlay.height);
+});
 
 const HAND_CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
@@ -218,6 +227,7 @@ function draw() {
   pendingGlass.push({ key: latest.key, tDraw });
 
   ctx.clearRect(0, 0, overlay.width, overlay.height);
+  if (!showOverlayEl.checked) return; // stats above still recorded
   for (let s = 0; s < latest.hands.length; s++) {
     const hand = latest.hands[s];
     if (!hand || !hand.landmarks) continue;
